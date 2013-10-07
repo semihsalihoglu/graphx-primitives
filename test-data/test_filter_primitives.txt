@@ -1,0 +1,12 @@
+# 0's initial degree is 5 (3 out, 2 in)
+# 1's initial degree is 3 (1 out, 2 in)
+# 2's initial degree is 3 (2 out, 1 in)
+# 3's initial degree is 2 (1 out, 1 in)
+# 4's initial degree is 1 (0 out, 1 in)
+0 1 0.3
+0 2 0.5
+0 3 0.8
+1 0 0.7
+2 0 0.1
+2 1 0.9
+3 4 0.6
