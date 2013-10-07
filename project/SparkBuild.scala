@@ -25,7 +25,7 @@ object SparkBuild extends Build {
   //val HADOOP_MAJOR_VERSION = "2"
   //val HADOOP_YARN = true
 
-  lazy val root = Project("root", file("."), settings = rootSettings) aggregate(core, repl, examples, bagel, graph, streaming)
+  lazy val root = Project("root", file("."), settings = rootSettings) aggregate(core, repl, examples, bagel, graph, streaming, testsemih)
 
   lazy val core = Project("core", file("core"), settings = coreSettings)
 
@@ -38,6 +38,8 @@ object SparkBuild extends Build {
   lazy val graph = Project("graph", file("graph"), settings = graphSettings) dependsOn (core, bagel)
 
   lazy val streaming = Project("streaming", file("streaming"), settings = streamingSettings) dependsOn (core)
+
+  lazy val testsemih = Project("testsemih", file("testsemih"), settings = testsemihSettings) dependsOn (core)
 
   // A configuration to set an alternative publishLocalConfiguration
   lazy val MavenCompile = config("m2r") extend(Compile)
@@ -223,6 +225,8 @@ object SparkBuild extends Build {
   def bagelSettings = sharedSettings ++ Seq(name := "spark-bagel")
 
   def graphSettings = sharedSettings ++ Seq(name := "spark-graph")
+
+  def testsemihSettings = sharedSettings ++ Seq(name := "test-semih")
 
   def streamingSettings = sharedSettings ++ Seq(
     name := "spark-streaming",

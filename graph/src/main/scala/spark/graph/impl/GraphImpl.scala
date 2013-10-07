@@ -25,12 +25,23 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
     this(vertices.partitions.size, edges.partitions.size, vertices, edges, null, null)
   }
 
+  def this () = this(-1, -1, null, null, null, null)
+
+  def newGraph[VD: ClassManifest, ED: ClassManifest](numVertexPartitions: Int,
+    numEdgePartitions: Int,
+    _rawVertices: RDD[Vertex[VD]],
+    _rawEdges: RDD[Edge[ED]],
+    _rawVTable: RDD[(Vid, (VD, Array[Pid]))],
+    _rawETable: RDD[(Pid, EdgePartition[ED])]) : Graph[VD, ED] = {
+	  new GraphImpl(numVertexPartitions, numEdgePartitions, _rawVertices, _rawEdges, _rawVTable, _rawETable)
+  }
+    
   def withPartitioner(numVertexPartitions: Int, numEdgePartitions: Int): Graph[VD, ED] = {
     if (_cached) {
-      new GraphImpl(numVertexPartitions, numEdgePartitions, null, null, _rawVTable, _rawETable)
+      newGraph(numVertexPartitions, numEdgePartitions, null, null, _rawVTable, _rawETable)
         .cache()
     } else {
-      new GraphImpl(numVertexPartitions, numEdgePartitions, _rawVertices, _rawEdges, null, null)
+      newGraph(numVertexPartitions, numEdgePartitions, _rawVertices, _rawEdges, null, null)
     }
   }
 
@@ -224,7 +235,7 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
       }
     }, preservesPartitioning = true).cache()
 
-    new GraphImpl(newVTable.partitions.length, eTable.partitions.length, null, null, newVTable, eTable)
+    newGraph(newVTable.partitions.length, eTable.partitions.length, null, null, newVTable, eTable)
   }
 
   override def joinVertices[U: ClassManifest](
@@ -245,9 +256,95 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
       }
     }, preservesPartitioning = true).cache()
 
-    new GraphImpl(newVTable.partitions.length, eTable.partitions.length, null, null, newVTable, eTable)
+    newGraph(newVTable.partitions.length, eTable.partitions.length, null, null, newVTable, eTable)
   }
 
+    
+  // Empty implementations of new primitives/syntactic sugars.
+  // TODO(semih): Merge everything here.
+   def filterEdges(p: Edge[ED] => Boolean): Graph[VD, ED] = {
+	   throw new RuntimeException("filterEdges is not implemented in the base GraphImpl.scala")
+   }
+   
+  def filterEdgesBasedOnSourceDestAndValue(p: EdgeTriplet[VD, ED] => Boolean): Graph[VD, ED] = {
+	  throw new RuntimeException("filterEdgesBasedOnSourceDestAndValue is not implemented in the base GraphImpl.scala")
+  }
+ 
+  def filterVertices(p: Vertex[VD] => Boolean): Graph[VD, ED] = {
+	   throw new RuntimeException("filterVertices is not implemented in the base GraphImpl.scala")
+  }
+
+  def filterVerticesBasedOnEdgeValues(direction: EdgeDirection,
+    p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
+	  throw new RuntimeException("filterVerticesBasedOnNeighborValues is not implemented in the base GraphImpl.scala")
+  }
+
+  def updateVerticesBasedOnEdgeValues[VD2: ClassManifest](
+    direction: EdgeDirection,
+    map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
+    throw new RuntimeException("updateVerticesBasedOnEdgeValues is not implemented in the base GraphImpl.scala")
+  }
+
+  def updateVertexValueBasedOnAnotherVertexsValue(idFunction: Vertex[VD] => Vid, setFunction: (VD, Vertex[VD]) => VD): Graph[VD, ED] = {
+      throw new RuntimeException("setVertexFieldsFromAnotherVertexsField is not implemented in the base GraphImpl.scala")
+  }
+
+  def updateVertexValueBasedOnAnotherVertexsValueReflection(idField: String,
+    fromField: String, toField: String) (implicit m: Manifest[VD]): Graph[VD, ED] = {
+          throw new RuntimeException("updateVertexValueBasedOnAnotherVertexsValueReflection is not implemented in the base GraphImpl.scala")
+  }
+
+  def pickRandomVertex(): Vid = {
+    throw new RuntimeException("pickRandomVertex is not implemented in the base GraphImpl.scala")
+  }
+
+  def propagateFixedNumberOfIterations[A](
+    direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    propagatedFieldF: VD => A,
+    propagateAlongEdgeF: (A, ED) => A,
+    aggrF: (A, Seq[A]) => A,
+    setF: (VD, A) => VD,
+    numIter: Int) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("propagateFromSomeUsingEdgeValueToAllInOutOrBothNeighbors is not implemented in the base GraphImpl.scala")
+  }
+  
+  
+  def simpleAggregateNeighborsFixedNumberOfIterations[A](
+    aggregatedValueF: VD => A,
+    aggrF: (A, Seq[A]) => A,
+    setF: (VD, A) => VD,
+    numIter: Int)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("simpleAggregateNeighborsFixedNumberOfIterations is not implemented in the base GraphImpl.scala")
+  }
+   
+  def simpleAggregateNeighborsFixedNumberOfIterationsReflection[A](
+    aggregatedField: String,
+    aggrF: (A, Seq[A]) => A,
+    numIter: Int) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("simpleAggregateNeighborsFixedNumberOfIterationsReflection is not implemented in the base GraphImpl.scala")
+  }
+
+  def propagateUntilConvergence[A](
+    direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    propagatedFieldF: VD => A,
+    propagateAlongEdgeF: (A, ED) => A,
+    aggrF: (A, Seq[A]) => A,
+    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]) = {
+    throw new RuntimeException("propagateFromSomeUsingEdgeValueToAllInOutOrBothNeighborsUntilConvergence is not implemented in the base GraphImpl.scala")
+  }: Graph[VD, ED]
+
+  def formSuperVertices(groupByKeyF: VD => Vid, edgeAggrF: Seq[ED] => ED, vertexAggrF: Seq[VD] => VD,
+    removeSelfLoops: Boolean) (implicit m: Manifest[VD]): Graph[VD, ED] = {
+    throw new RuntimeException("formSuperVertices is not implemented in the base GraphImpl.scala")    
+  }
+
+  def mapReduceOverVerticesUsingEdges[A](direction: EdgeDirection,
+    mapF: ((Vid, (VD, Option[Seq[spark.graph.Edge[ED]]]))) => Iterable[A],
+    reduceF: (A, A) => A) (implicit m: Manifest[VD], n: Manifest[A]): A = {
+    throw new RuntimeException("mapReduceOverVerticesUsingEdges is not implemented in the base GraphImpl.scala")     
+  }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////
   // Internals hidden from callers
@@ -339,6 +436,9 @@ object GraphImpl {
       vSet.iterator.map { vid => (vid.intValue, pid) }
     }.groupByKey(partitioner)
 
+    val foo = vertices.map { v => (v.id, v.data) }
+    foo.join(foo)
+ 
     vertices
       .map { v => (v.id, v.data) }
       .partitionBy(partitioner)

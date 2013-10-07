@@ -1,8 +1,10 @@
 package spark.graph.util
 
 import org.scalatest.FunSuite
+import org.junit.runner.RunWith
+import org.scalatest.junit.JUnitRunner
 
-
+@RunWith(classOf[JUnitRunner])
 class BytecodeUtilsSuite extends FunSuite {
 
   import BytecodeUtilsSuite.TestClass

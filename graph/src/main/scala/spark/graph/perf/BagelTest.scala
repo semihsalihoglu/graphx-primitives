@@ -41,32 +41,32 @@ object BagelTest {
       case (opt, _) => throw new IllegalArgumentException("Invalid option: " + opt)
     }
 
-    val sc = new SparkContext(host, "PageRank(" + fname + ")")
-    val g = GraphLoader.textFile(sc, fname, a => 1.0F).withPartitioner(numVPart, numEPart).cache()
-    val startTime = System.currentTimeMillis
-
-    val numVertices = g.vertices.count()
-
-    val vertices = g.collectNeighborIds(EdgeDirection.Out).map { case (vid, neighbors) =>
-      (vid.toString, new PRVertex(1.0, neighbors.map(_.toString)))
-    }
-
-    // Do the computation
-    val epsilon = 0.01 / numVertices
-    val messages = sc.parallelize(Array[(String, PRMessage)]())
-    val utils = new PageRankUtils
-    val result =
-        Bagel.run(
-          sc, vertices, messages, combiner = new PRCombiner(),
-          numPartitions = numVPart)(
-          utils.computeWithCombiner(numVertices, epsilon, numIter))
-
-    println("Total rank: " + result.map{ case (id, r) => r.value }.reduce(_+_) )
-    if (!outFname.isEmpty) {
-      println("Saving pageranks of pages to " + outFname)
-      result.map{ case (id, r) => id + "\t" + r.value }.saveAsTextFile(outFname)
-    }
-    println("Runtime:    " + ((System.currentTimeMillis - startTime)/1000.0) + " seconds")
-    sc.stop()
+//    val sc = new SparkContext(host, "PageRank(" + fname + ")")
+//    val g = GraphLoader.textFile(sc, fname, a => 1.0F).withPartitioner(numVPart, numEPart).cache()
+//    val startTime = System.currentTimeMillis
+//
+//    val numVertices = g.vertices.count()
+//
+//    val vertices = g.collectNeighborIds(EdgeDirection.Out).map { case (vid, neighbors) =>
+//      (vid.toString, new PRVertex(1.0, neighbors.map(_.toString)))
+//    }
+//
+//    // Do the computation
+//    val epsilon = 0.01 / numVertices
+//    val messages = sc.parallelize(Array[(String, PRMessage)]())
+//    val utils = new PageRankUtils
+//    val result =
+//        Bagel.run(
+//          sc, vertices, messages, combiner = new PRCombiner(),
+//          numPartitions = numVPart)(
+//          utils.computeWithCombiner(numVertices, epsilon, numIter))
+//
+//    println("Total rank: " + result.map{ case (id, r) => r.value }.reduce(_+_) )
+//    if (!outFname.isEmpty) {
+//      println("Saving pageranks of pages to " + outFname)
+//      result.map{ case (id, r) => id + "\t" + r.value }.saveAsTextFile(outFname)
+//    }
+//    println("Runtime:    " + ((System.currentTimeMillis - startTime)/1000.0) + " seconds")
+//    sc.stop()
   }
 }
