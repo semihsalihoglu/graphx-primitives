@@ -1,0 +1,1 @@
+# Empty edge list (we don't need there to be edges for updateAnotherVertex)

@@ -44,7 +44,7 @@ object GraphLab {
 
 
     // Add an active attribute to all vertices to track convergence.
-    var activeGraph = graph.mapVertices {
+    var activeGraph = graph.updateVertices {
       case Vertex(id, data) => (true, data)
     }.cache()
 
@@ -113,15 +113,6 @@ object GraphLab {
     }
 
     // Remove the active attribute from the vertex data before returning the graph
-    activeGraph.mapVertices(v => v.data._2)
+    activeGraph.updateVertices(v => v.data._2)
   }
 }
-
-
-
-
-
-
-
-
-

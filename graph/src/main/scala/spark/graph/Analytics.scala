@@ -23,7 +23,7 @@ object Analytics extends Logging {
   // //     (me_id, edge) => edge.src.data._2 / edge.src.data._1, // gather
   // //     (a: Float, b: Float) => a + b, // merge
   // //     (vertex, a: Option[Float]) => (vertex.data._1, (0.15F + 0.85F * a.getOrElse(0F))), // apply
-  // //     numIter).mapVertices{ case Vertex(id, (outDeg, r)) => Vertex(id, r) }
+  // //     numIter).updateVertices{ case Vertex(id, (outDeg, r)) => Vertex(id, r) }
   // // }
   // def pagerank[VD: Manifest, ED: Manifest](graph: Graph[VD, ED], numIter: Int) = {
   //   // Compute the out degree of each vertex
@@ -35,7 +35,7 @@ object Analytics extends Logging {
   //     (a: Double, b: Double) => a + b, // merge
   //     0.0, // default
   //     (vertex, a: Double) => (vertex.data._1, (0.15 + 0.85 * a)), // apply
-  //     numIter).mapVertices{ case Vertex(id, (outDeg, r)) => Vertex(id, r) }
+  //     numIter).updateVertices{ case Vertex(id, (outDeg, r)) => Vertex(id, r) }
   // }
 
   /**
@@ -51,7 +51,7 @@ object Analytics extends Logging {
       (me_id, edge) => Some(edge.src.data._2 / edge.src.data._1), // gather
       (a: Double, b: Double) => a + b, // merge
       1.0,
-      numIter).mapVertices{ case Vertex(id, (outDeg, r)) => r }
+      numIter).updateVertices{ case Vertex(id, (outDeg, r)) => r }
   }
 
 //   /**
@@ -71,7 +71,7 @@ object Analytics extends Logging {
 //       (vertex, a: Option[Float]) =>
 //         (vertex.data._1, (0.15F + 0.85F * a.getOrElse(0F)), vertex.data._2), // apply
 //       (me_id, edge) => math.abs(edge.src.data._2 - edge.dst.data._1) > tol, // scatter
-//       maxIter).mapVertices { case Vertex(vid, data) => Vertex(vid, data._2) }
+//       maxIter).updateVertices { case Vertex(vid, data) => Vertex(vid, data._2) }
 //   }
 
 //   /**
@@ -81,7 +81,7 @@ object Analytics extends Logging {
 //    * that vertex.
 //    */
 //   def connectedComponents[VD: Manifest, ED: Manifest](graph: Graph[VD, ED], numIter: Int) = {
-//     val ccGraph = graph.mapVertices { case Vertex(vid, _) => Vertex(vid, vid) }
+//     val ccGraph = graph.updateVertices { case Vertex(vid, _) => Vertex(vid, vid) }
 //     GraphLab.iterateGA[Int, ED, Int](ccGraph)(
 //       (me_id, edge) => edge.otherVertex(me_id).data, // gather
 //       (a: Int, b: Int) => math.min(a, b), // merge
@@ -95,7 +95,7 @@ object Analytics extends Logging {
 //    */
 //   def shortestPath[VD: Manifest](graph: Graph[VD, Float], sources: List[Int], numIter: Int) = {
 //     val sourceSet = sources.toSet
-//     val spGraph = graph.mapVertices {
+//     val spGraph = graph.updateVertices {
 //       case Vertex(vid, _) => Vertex(vid, (if(sourceSet.contains(vid)) 0.0F else Float.MaxValue))
 //     }
 //     GraphLab.iterateGA[Float, Float, Float](spGraph)(
@@ -440,7 +440,7 @@ object Analytics extends Logging {
   //     (vertex, a: Option[Double]) =>
   //       (vertex.data._1, (0.15 + 0.85 * a.getOrElse(0.0)), vertex.data._2), // apply
   //     (me_id, edge) => math.abs(edge.src.data._2 - edge.dst.data._1) > tol, // scatter
-  //     maxIter).mapVertices { case Vertex(vid, data) => Vertex(vid, data._2) }
+  //     maxIter).updateVertices { case Vertex(vid, data) => Vertex(vid, data._2) }
   // }
 
   // /**
@@ -450,7 +450,7 @@ object Analytics extends Logging {
   //  * that vertex.
   //  */
   // def connectedComponents[VD: Manifest, ED: Manifest](graph: Graph[VD, ED], numIter: Int) = {
-  //   val ccGraph = graph.mapVertices { case Vertex(vid, _) => Vertex(vid, vid) }
+  //   val ccGraph = graph.updateVertices { case Vertex(vid, _) => Vertex(vid, vid) }
   //   GraphLab.iterateGA[Int, ED, Int](ccGraph)(
   //     (me_id, edge) => edge.otherVertex(me_id).data, // gather
   //     (a: Int, b: Int) => math.min(a, b), // merge
@@ -464,7 +464,7 @@ object Analytics extends Logging {
   //  */
   // def shortestPath[VD: Manifest](graph: Graph[VD, Double], sources: List[Int], numIter: Int) = {
   //   val sourceSet = sources.toSet
-  //   val spGraph = graph.mapVertices {
+  //   val spGraph = graph.updateVertices {
   //     case Vertex(vid, _) => Vertex(vid, (if(sourceSet.contains(vid)) 0.0 else Double.MaxValue))
   //   }
   //   GraphLab.iterateGA[Double, Double, Double](spGraph)(

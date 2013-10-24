@@ -89,7 +89,7 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
     new EdgeTripletRDD(vTableReplicated, eTable).mapPartitions { part => part.next()._2 }
   }
 
-  override def mapVertices[VD2: ClassManifest](f: Vertex[VD] => VD2): Graph[VD2, ED] = {
+  override def updateVertices[VD2: ClassManifest](f: Vertex[VD] => VD2): Graph[VD2, ED] = {
     newGraph(vertices.map(v => Vertex(v.id, f(v))), edges)
   }
 
@@ -274,42 +274,65 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
 	   throw new RuntimeException("filterVertices is not implemented in the base GraphImpl.scala")
   }
 
-  def filterVerticesBasedOnEdgeValues(direction: EdgeDirection,
+  def filterVerticesUsingLocalEdges(direction: EdgeDirection,
     p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
 	  throw new RuntimeException("filterVerticesBasedOnNeighborValues is not implemented in the base GraphImpl.scala")
   }
-
-  def updateVerticesBasedOnEdgeValues[VD2: ClassManifest](
+  
+  def aggregateNeighborValuesFixedNumberOfIterations[A](
+    direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    msgF: Vertex[VD] => Option[A],
+    propagateAlongEdgeF: (A, ED) => A,
+    updateF: ((Vertex[VD], Seq[Edge[ED]]), Option[Seq[A]]) => VD,
+    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("aggregateNeighborValuesFixedNumberOfIterations is not implemented in the base GraphImpl.scala")  
+  }
+    
+  def updateVerticesBasedOnNeighbors[A](
+	direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    msgF: Vertex[VD] => Option[A],
+    updateF: (Vertex[VD], Option[Seq[A]]) => VD) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("updateVerticesBasedOnNeighbors is not implemented in the base GraphImpl.scala")  
+  }
+  
+  def updateVerticesUsingLocalEdges[VD2: ClassManifest](
     direction: EdgeDirection,
     map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
     throw new RuntimeException("updateVerticesBasedOnEdgeValues is not implemented in the base GraphImpl.scala")
   }
 
-  def updateVertexValueBasedOnAnotherVertexsValue(idFunction: Vertex[VD] => Vid, setFunction: (VD, Vertex[VD]) => VD): Graph[VD, ED] = {
-      throw new RuntimeException("setVertexFieldsFromAnotherVertexsField is not implemented in the base GraphImpl.scala")
+  def updateAnotherVertexBasedOnSelf[A](
+    fromVertexF: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setF: (VD, Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+      throw new RuntimeException("updateAnotherVertexBasedOnSelf is not implemented in the base GraphImpl.scala")
   }
 
-  def updateVertexValueBasedOnAnotherVertexsValueReflection(idField: String,
-    fromField: String, toField: String) (implicit m: Manifest[VD]): Graph[VD, ED] = {
-          throw new RuntimeException("updateVertexValueBasedOnAnotherVertexsValueReflection is not implemented in the base GraphImpl.scala")
+  def updateSelfUsingAnotherVertexsValue[A](
+    verticesToUpdateP: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setFunction: (Vertex[VD], A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    throw new RuntimeException("updateSelfUsingAnotherVertexsValue is not implemented in the base GraphImpl.scala")
+  }
+  
+  def pickRandomVertices(p: Vertex[VD] => Boolean, numVerticesToPick: Int): Seq[Vid] = {
+     throw new RuntimeException("pickRandomVertices is not implemented in the base GraphImpl.scala")
   }
 
-  def pickRandomVertex(): Vid = {
-    throw new RuntimeException("pickRandomVertex is not implemented in the base GraphImpl.scala")
-  }
-
-  def propagateFixedNumberOfIterations[A](
+  def propagateAndAggregateFixedNumberOfIterations[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
+    setF: (Vertex[VD], Seq[A]) => VD,
     numIter: Int) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED] = {
     throw new RuntimeException("propagateFromSomeUsingEdgeValueToAllInOutOrBothNeighbors is not implemented in the base GraphImpl.scala")
   }
-  
-  
+
   def simpleAggregateNeighborsFixedNumberOfIterations[A](
     aggregatedValueF: VD => A,
     aggrF: (A, Seq[A]) => A,
@@ -325,14 +348,13 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
     throw new RuntimeException("simpleAggregateNeighborsFixedNumberOfIterationsReflection is not implemented in the base GraphImpl.scala")
   }
 
-  def propagateUntilConvergence[A](
+  def propagateAndAggregateUntilConvergence[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]) = {
-    throw new RuntimeException("propagateFromSomeUsingEdgeValueToAllInOutOrBothNeighborsUntilConvergence is not implemented in the base GraphImpl.scala")
+    setF: (Vertex[VD], Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]) = {
+    throw new RuntimeException("propagateUntilConvergence is not implemented in the base GraphImpl.scala")
   }: Graph[VD, ED]
 
   def formSuperVertices(groupByKeyF: VD => Vid, edgeAggrF: Seq[ED] => ED, vertexAggrF: Seq[VD] => VD,
@@ -340,10 +362,10 @@ class GraphImpl[VD: ClassManifest, ED: ClassManifest] protected (
     throw new RuntimeException("formSuperVertices is not implemented in the base GraphImpl.scala")    
   }
 
-  def mapReduceOverVerticesUsingEdges[A](direction: EdgeDirection,
+  def aggregateGlobalValueOverVertices[A](direction: EdgeDirection,
     mapF: ((Vid, (VD, Option[Seq[spark.graph.Edge[ED]]]))) => Iterable[A],
     reduceF: (A, A) => A) (implicit m: Manifest[VD], n: Manifest[A]): A = {
-    throw new RuntimeException("mapReduceOverVerticesUsingEdges is not implemented in the base GraphImpl.scala")     
+    throw new RuntimeException("aggregateGlobalValueOverVertices is not implemented in the base GraphImpl.scala")     
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////

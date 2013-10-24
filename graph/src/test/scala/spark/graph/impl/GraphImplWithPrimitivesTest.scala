@@ -26,10 +26,10 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
   val formSuperverticesTestEdgesFileName = "/Users/semihsalihoglu/projects/graphx/spark/test-data/test_form_supervertices_edges.txt"
   val smallIntegerWeightedGraphVerticesFileName = "/Users/semihsalihoglu/projects/graphx/spark/test-data/small_integer_weighted_vertices.txt"
   val smallIntegerWeightedGraphEdgesFileName = "/Users/semihsalihoglu/projects/graphx/spark/test-data/small_integer_weighted_edges.txt"
-    
+  val updateAnotherVertexTestVerticesFileName = "/Users/semihsalihoglu/projects/graphx/spark/test-data/update_another_vertex_test_vertices.txt"
+  val updateAnotherVertexTestEdgesFileName = "/Users/semihsalihoglu/projects/graphx/spark/test-data/update_another_vertex_test_edges.txt"    
+
   test("filterEdgesTest") {
-    System.setProperty("spark.serializer", "spark.KryoSerializer")
-    System.setProperty("spark.kryo.registrator", "spark.bagel.examples.PRKryoRegistrator")
     var (sc, g) = loadGraphAndCache(filterPrimitivesTestFile, "filterEdgesTest")
     System.out.println("Before: numVertices: " + g.numVertices + " numEdges: " + g.numEdges);
     println("filtering edges by edge.data > 0.5")
@@ -58,7 +58,7 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     var (sc, g) = loadGraphAndCache(filterPrimitivesTestFile, "filterVerticesBasedOnOutNeighborValuesTest")
     System.out.println("Before: numVertices: " + g.numVertices + " numEdges: " + g.numEdges);
     // Filter vertices that have an outgoing edge with a value > 0.7
-    g = g.filterVerticesBasedOnEdgeValues(EdgeDirection.Out,
+    g = g.filterVerticesUsingLocalEdges(EdgeDirection.Out,
       vIDVDataAndNeighbors => {
         val optionalListOfEdges = vIDVDataAndNeighbors._2._2
         if (optionalListOfEdges.isEmpty) true
@@ -74,7 +74,7 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     var (sc, g) = loadGraphAndCache(filterPrimitivesTestFile, "filterVerticesBasedOnInNeighborValuesTest")
     System.out.println("Before: numVertices: " + g.numVertices + " numEdges: " + g.numEdges);
     // Filter vertices that have an incoming edge with a value > 0.7
-    g = g.filterVerticesBasedOnEdgeValues(EdgeDirection.In,
+    g = g.filterVerticesUsingLocalEdges(EdgeDirection.In,
       vIDVDataAndNeighbors => {
         val optionalListOfEdges = vIDVDataAndNeighbors._2._2
         if (optionalListOfEdges.isEmpty) true
@@ -91,7 +91,7 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
       "filterVerticesBasedOnBothInAndOutNeighborValuesTest")
     System.out.println("Before: numVertices: " + g.numVertices + " numEdges: " + g.numEdges);
     // Filter vertices that have an incoming edge with a value == 0.6 (3 and 4 should be thrown away)
-    g = g.filterVerticesBasedOnEdgeValues(EdgeDirection.Both,
+    g = g.filterVerticesUsingLocalEdges(EdgeDirection.Both,
       vIDVDataAndNeighbors => {
         val optionalListOfEdges = vIDVDataAndNeighbors._2._2
         if (optionalListOfEdges.isEmpty) true
@@ -109,8 +109,11 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     System.out.println("Before: numVertices: " + g.numVertices + " numEdges: " + g.numEdges);
     // We shift the values of each vertex i to the value of (i-1)%5. That is, vertex 1 gets vertex 0's value
     // vertex 2 gets vertex 1's value, ..., and vertex 0 gets vertex 4's value. 
-    g = g.updateVertexValueBasedOnAnotherVertexsValue(v => (v.id - 1 + 5) % 5,
-      (neighborValue, ownVertex) => neighborValue)
+    g = g.updateSelfUsingAnotherVertexsValue[Int](
+      v => true,
+      v => (v.id - 1 + 5) % 5 /* id function */,
+      otherV => otherV.data,
+      (v, msg) => { v.data = msg; v.data })
 
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
@@ -130,98 +133,48 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     sc.stop()
   }
 
-  test("updateVertexValueBasedOnAnotherVertexsValueReflectionOverwriteDoubleTest") {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
-      "updateVertexValueBasedOnAnotherVertexsValueReflectionOverwriteDoubleTest")
-    // 0 points to 2, 2->4, 4->6, 6->0, and 1->3, 3->5, 5->7, 7->1
-    g = g.updateVertexValueBasedOnAnotherVertexsValueReflection("intValue1", "doubleValue", "doubleValue")
-    assert(8 == g.numEdges)
-    assert(8 == g.numVertices)
-    val localVertices = g.vertices.collect()
-    for (vertex <- localVertices) {
-      if (vertex.id == 0) {
-        assert(0.2 == vertex.data.doubleValue) // previously vertex 0 used to have doubleValue 0.0
-      } else if (vertex.id == 1) {
-        assert(0.3 == vertex.data.doubleValue) // previously vertex 1 used to have doubleValue 0.1
-      } else if (vertex.id == 2) {
-        assert(0.4 == vertex.data.doubleValue) // previously vertex 2 used to have doubleValue 0.2
-      } else if (vertex.id == 3) {
-        assert(0.5 == vertex.data.doubleValue) // previously vertex 3 used to have doubleValue 0.3
-      } else if (vertex.id == 4) {
-        assert(0.6 == vertex.data.doubleValue) // previously vertex 4 used to have doubleValue 0.4
-      } else if (vertex.id == 5) {
-        assert(0.7 == vertex.data.doubleValue) // previously vertex 5 used to have doubleValue 0.5
-      } else if (vertex.id == 6) {
-        assert(0.0 == vertex.data.doubleValue) // previously vertex 6 used to have doubleValue 0.6
-      } else if (vertex.id == 7) {
-        assert(0.1 == vertex.data.doubleValue) // previously vertex 7 used to have doubleValue 0.7
-      }
-    }
-    sc.stop()
-  }
+  test("updateAnotherVertexBasedOnSelfTest") {
+    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(updateAnotherVertexTestVerticesFileName,
+      updateAnotherVertexTestEdgesFileName, "updateAnotherVertexBasedOnSelfTest")
+    g = g.updateAnotherVertexBasedOnSelf[Double](v => v.id < 14 && v.data.intValue1 > 0,
+      v => v.data.intValue1, v => v.data.doubleValue,
+      (vvals, msgs) => { val sum = msgs.sum; vvals.doubleValue = sum; vvals })
 
-  test("updateVertexValueBasedOnAnotherVertexsValueReflectionOverwriteIntTest") {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
-      "updateVertexValueBasedOnAnotherVertexsValueReflectionTest")
-    g = g.updateVertexValueBasedOnAnotherVertexsValueReflection("intValue1", "intValue1", "intValue1")
-    assert(8 == g.numEdges)
-    assert(8 == g.numVertices)
+    assert(0 == g.numEdges)
+    assert(15 == g.numVertices)
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
       assert(-1 == vertex.data.intValue2)
-      if (vertex.id == 0) {
-        assert(4 == vertex.data.intValue1) // previously vertex 0 used to have intValue1 2
-      } else if (vertex.id == 1) {
-        assert(5 == vertex.data.intValue1) // previously vertex 1 used to have intValue1 3
+      if (vertex.id == 1) {
+        assert(0.1 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(2 == vertex.data.intValue1)
       } else if (vertex.id == 2) {
-        assert(6 == vertex.data.intValue1) // previously vertex 2 used to have intValue1 4
+        assert(0.1 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
       } else if (vertex.id == 3) {
-        assert(7 == vertex.data.intValue1) // previously vertex 3 used to have intValue1 5
+        assert(0.3 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(4 == vertex.data.intValue1)
       } else if (vertex.id == 4) {
-        assert(0 == vertex.data.intValue1) // previously vertex 4 used to have intValue1 6
+        assert(0.8 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
       } else if (vertex.id == 5) {
-        assert(1 == vertex.data.intValue1) // previously vertex 5 used to have intValue1 7
+        assert(0.5 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(4 == vertex.data.intValue1)
       } else if (vertex.id == 6) {
-        assert(2 == vertex.data.intValue1) // previously vertex 6 used to have intValue1 0
+        assert(0.7 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(7 == vertex.data.intValue1)
       } else if (vertex.id == 7) {
-        assert(3 == vertex.data.intValue1) // previously vertex 7 used to have intValue1 1
-      }
-    }
-    sc.stop()
-  }
-
-  test("updateVertexValueBasedOnAnotherVertexsValueReflectionIntWritingToAnotherInt") {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
-      "updateVertexValueBasedOnAnotherVertexsValueReflectionIntWritingToAnotherInt")
-    g = g.updateVertexValueBasedOnAnotherVertexsValueReflection("intValue1", "intValue1", "intValue2")
-    assert(8 == g.numEdges)
-    assert(8 == g.numVertices)
-    val localVertices = g.vertices.collect()
-    for (vertex <- localVertices) {
-      if (vertex.id == 0) {
-        assert(4 == vertex.data.intValue2) // previously vertex 0 used to have intValue2 -1
-        assert(2 == vertex.data.intValue1)
-      } else if (vertex.id == 1) {
-        assert(5 == vertex.data.intValue2) // previously vertex 1 used to have intValue2 -1
-        assert(3 == vertex.data.intValue1)
-      } else if (vertex.id == 2) {
-        assert(6 == vertex.data.intValue2) // previously vertex 2 used to have intValue2 -1
-        assert(4 == vertex.data.intValue1)
-      } else if (vertex.id == 3) {
-        assert(7 == vertex.data.intValue2) // previously vertex 3 used to have intValue2 -1
-        assert(5 == vertex.data.intValue1)
-      } else if (vertex.id == 4) {
-        assert(0 == vertex.data.intValue2) // previously vertex 4 used to have intValue2 -1
-        assert(6 == vertex.data.intValue1)
-      } else if (vertex.id == 5) {
-        assert(1 == vertex.data.intValue2) // previously vertex 5 used to have intValue2 -1
-        assert(7 == vertex.data.intValue1)
-      } else if (vertex.id == 6) {
-        assert(2 == vertex.data.intValue2) // previously vertex 6 used to have intValue2 -1
-        assert(0 == vertex.data.intValue1)
-      } else if (vertex.id == 7) {
-        assert(3 == vertex.data.intValue2) // previously vertex 7 used to have intValue2 -1
-        assert(1 == vertex.data.intValue1)
+        assert(0.6 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(6 == vertex.data.intValue1)
+      } else if (vertex.id == 8) {
+        assert(3.3 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
+      } else if (vertex.id == 9) {
+        assert(0.9 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(8 == vertex.data.intValue1)
+      } else if (vertex.id == 10) {
+        assert(1.0 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
+      } else if (vertex.id == 11) {
+        assert(1.1 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(8 == vertex.data.intValue1)
+      } else if (vertex.id == 12) {
+        assert(1.2 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
+      } else if (vertex.id == 13) {
+        assert(1.3 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(8 == vertex.data.intValue1)
+      } else if (vertex.id == 14) {
+        assert(1.4 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(-1 == vertex.data.intValue1)
+      } else if (vertex.id == 15) {
+        assert(1.5 == getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)); assert(8 == vertex.data.intValue1)
       }
     }
     sc.stop()
@@ -232,19 +185,24 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
       "pickRandomVertexTest")
     val vertexId = g.pickRandomVertex()
     println("picked vertex id: " + vertexId)
+    assert(vertexId >= 100 && vertexId <= 1000)
     sc.stop()
   }
 
+  test("pickRandomVerticesAmongstTest") {
+    var (sc, g) = loadGraphAndCache("/Users/semihsalihoglu/projects/graphx/spark/test-data/test_pick_random_vertex.txt",
+      "pickRandomVertexTest")
+    val verticesPicked = g.pickRandomVertices(v => v.id > 500, 2)
+    println("picked vertices: " + verticesPicked)
+    assert(2 == verticesPicked.size)
+    assert(verticesPicked(0) > 500 && verticesPicked(0) <= 1000)
+    assert(verticesPicked(1) > 500 && verticesPicked(1) <= 1000)
+    sc.stop()
+  }
   test("propagateForwardFixedNumberOfIterationsOneIterationTest") {
     var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterations(1, EdgeDirection.Out,
       "propagateForwardFixedNumberOfIterationsOneIterationTest")
 	collectVerticesAndVerifyOneIterationOfDoubleValuePropagationForwardAndStopSparkContext(sc, g)  
-  }
-
-  test("propagateForwardFixedNumberOfIterationsReflectionOneIterationTest") {
-    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(1, EdgeDirection.Out,
-      "propagateForwardFixedNumberOfIterationsReflectionOneIterationTest")
-      collectVerticesAndVerifyOneIterationOfDoubleValuePropagationForwardAndStopSparkContext(sc, g)
   }
 
   private def collectVerticesAndVerifyOneIterationOfDoubleValuePropagationForwardAndStopSparkContext(
@@ -280,12 +238,12 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
       "propagateInTransposeFixedNumberOfIterationsOneIterationTest")
     collectVerticesAndVerifyOneIterationOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
   }
-  
-  test("propagateInTransposeFixedNumberOfIterationsReflectionOneIterationTest") {
-    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(1, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsReflectionOneIterationTest")
-    collectVerticesAndVerifyOneIterationOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
-  }
+//  
+//  test("propagateInTransposeFixedNumberOfIterationsReflectionOneIterationTest") {
+//    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(1, EdgeDirection.In,
+//      "propagateInTransposeFixedNumberOfIterationsReflectionOneIterationTest")
+//    collectVerticesAndVerifyOneIterationOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
+//  }
 
   private def collectVerticesAndVerifyOneIterationOfDoubleValuePropagationInTransposeAndStopSparkContext(
     sc: SparkContext,
@@ -320,12 +278,12 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
       "propagateForwardFixedNumberOfIterationsTwoIterationTest")
     collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationForwardAndStopSparkContext(sc, g)
   }
-
-  test("propagateForwardFixedNumberOfIterationsReflectionTwoIterationsTest") {
-    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(2, EdgeDirection.Out,
-      "propagateForwardFixedNumberOfIterationsReflectionTwoIterationsTest")
-    collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationForwardAndStopSparkContext(sc, g)
-  }
+//
+//  test("propagateForwardFixedNumberOfIterationsReflectionTwoIterationsTest") {
+//    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(2, EdgeDirection.Out,
+//      "propagateForwardFixedNumberOfIterationsReflectionTwoIterationsTest")
+//    collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationForwardAndStopSparkContext(sc, g)
+//  }
 
   private def collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationForwardAndStopSparkContext(
     sc: SparkContext,
@@ -360,12 +318,12 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
       "propagateFixedNumberOfIterationsReflection")
     collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
   }
-  
-  test("propagateInTransposeFixedNumberOfIterationsReflectionTwoIterationTest") {
-    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(2, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsReflectionTwoIterationTest")
-    collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
-  }
+//  
+//  test("propagateInTransposeFixedNumberOfIterationsReflectionTwoIterationTest") {
+//    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterationsReflection(2, EdgeDirection.In,
+//      "propagateInTransposeFixedNumberOfIterationsReflectionTwoIterationTest")
+//    collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationInTransposeAndStopSparkContext(sc, g)
+//  }
 
   private def collectVerticesAndVerifyTwoIterationsOfDoubleValuePropagationInTransposeAndStopSparkContext(
     sc: SparkContext,
@@ -397,208 +355,181 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
 
   test("propagateForwardFixedNumberOfIterationsSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.Out,
-      "propagateForwardFixedNumberOfIterationsSevenIterationsTest", false /* do not use reflection */)
+      "propagateForwardFixedNumberOfIterationsSevenIterationsTest")
   }
 
   test("propagateForwardFixedNumberOfIterationsReflectionSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.Out,
-      "propagateForwardFixedNumberOfIterationsReflectionSevenIterationsTest", true /* use reflection */)
+      "propagateForwardFixedNumberOfIterationsReflectionSevenIterationsTest")
   }
 
   test("propagateFixedNumberOfIterationsMoreThanSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(8, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsEightIterationsTest", false /* do not use reflection */)
+      "propagateFixedNumberOfIterationsEightIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(9, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsNineIterationsTest", false /* do not use reflection */)
+      "propagateFixedNumberOfIterationsNineIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsTenIterationsTest", false /* do not use reflection */)
+      "propagateFixedNumberOfIterationsTenIterationsTest")
   }
 
   test("propagateFixedNumberOfIterationsReflectionMoreThanSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(8, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsEightIterationsTest", true /* use reflection */)
+      "propagateFixedNumberOfIterationsEightIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(9, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsNineIterationsTest", true /* use reflection */)
+      "propagateFixedNumberOfIterationsNineIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.Out,
-      "propagateFixedNumberOfIterationsTenIterationsTest", true /* use reflection */)
+      "propagateFixedNumberOfIterationsTenIterationsTest")
   }
 
   test("propagateInTransposeFixedNumberOfIterationsSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsSevenIterationsTest", false /* do not use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsSevenIterationsTest")
   }
 
   test("propagateInTransposeFixedNumberOfIterationsReflectionSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsSevenIterationsTest", true /* use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsSevenIterationsTest")
   }
 
   test("propagateInTransposeFixedNumberOfIterationsMoreThanSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(8, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsEightIterationsTest", false /* do not use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsEightIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(9, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsNineIterationsTest", false /* do not use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsNineIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsTenIterationsTest", false /* do not use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsTenIterationsTest")
   }
 
   test("propagateInTransposeFixedNumberOfIterationsReflectionMoreThanSevenIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(8, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsEightIterationsTest", true /* use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsEightIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(9, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsNineIterationsTest", true /* use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsNineIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.In,
-      "propagateInTransposeFixedNumberOfIterationsTenIterationsTest", true /* use reflection */)
+      "propagateInTransposeFixedNumberOfIterationsTenIterationsTest")
   }
 
   test("propagateInBothDirectionsFixedNumberOfIterationsFourIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(4, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsFourIterationsTest", false /* do not use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsFourIterationsTest")
   }
 
   test("propagateInBothDirectionsFixedNumberOfIterationsReflectionFourIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(4, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsReflectionFourIterationsTest", true /* use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsReflectionFourIterationsTest")
   }
 
   test("propagateInBothDirectionsFixedNumberOfIterationsMoreThanFourIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(5, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsFiveIterationsTest", false /* do not use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsFiveIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsSevenIterationsTest", false /* do not use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsSevenIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsTenIterationsTest",  false /* do not use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsTenIterationsTest")
   }
 
   test("propagateInBothDirectionsFixedNumberOfIterationsReflectionMoreThanFourIterationsTest") {
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(5, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsReflectionFiveIterationsTest", true /* use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsReflectionFiveIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(7, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsReflectionSevenIterationsTest", true /* use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsReflectionSevenIterationsTest")
     doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(10, EdgeDirection.Both,
-      "propagateInBothDirectionsFixedNumberOfIterationsReflectionTenIterationsTest",  true /* use reflection */)
+      "propagateInBothDirectionsFixedNumberOfIterationsReflectionTenIterationsTest")
   }
 
   test("propagateForwardUntilConvergenceTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.Out, false /* do not use reflection */,
-      "propagateForwardUntilConvergenceTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.Out, "propagateForwardUntilConvergenceTest")
   }
 
   test("propagateForwardUntilConvergenceReflectionTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.Out, true /* use reflection */,
-      "propagateForwardUntilConvergenceReflectionTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.Out, "propagateForwardUntilConvergenceReflectionTest")
   }
 
   test("propagateInTransposeUntilConvergenceTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.In, false /* do not use reflection */,
-      "propagateInTransposeUntilConvergenceTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.In, "propagateInTransposeUntilConvergenceTest")
   }
 
   test("propagateInTransposeUntilConvergenceReflectionTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.In, true /* use reflection */,
-      "propagateInTransposeUntilConvergenceReflectionTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.In, "propagateInTransposeUntilConvergenceReflectionTest")
   }
 
   test("propagateInBothDirectionsUntilConvergenceTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.Both, false /* do not use reflection */,
-      "propagateInBothDirectionsUntilConvergenceTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.Both, "propagateInBothDirectionsUntilConvergenceTest")
   }
 
   test("propagateInBothDirectionsUntilConvergenceReflectionTest") {
-    doPropagateUntilConvergenceTest(EdgeDirection.Both, true /* use reflection */,
-      "propagateInBothDirectionsUntilConvergenceReflectionTest")
+    doPropagateUntilConvergenceTest(EdgeDirection.Both, "propagateInBothDirectionsUntilConvergenceReflectionTest")
   }
-  
-  test("simplePropagateTest") {
-    doSimplePropagateTest(EdgeDirection.Out)
-    doSimplePropagateTest(EdgeDirection.In)
-    doSimplePropagateTest(EdgeDirection.Both)
-  }
+//  
+//  test("simplePropagateTest") {
+//    doSimplePropagateTest(EdgeDirection.Out)
+//    doSimplePropagateTest(EdgeDirection.In)
+//    doSimplePropagateTest(EdgeDirection.Both)
+//  }
+//
+//  test("simplePropagateForwardFromOneTest") {
+//	doSimplePropagateForwardFromOneTest(false /* do not use reflection */,
+//	  "simplePropagateForwardFromOneTest")
+//  }
+//  
+//  test("simplePropagateForwardFromOneReflectionTest") {
+//	  doSimplePropagateForwardFromOneTest(true /* use reflection */,
+//	    "simplePropagateForwardFromOneReflectionTest")
+//  }
+//  
+//  private def doSimplePropagateForwardFromOneTest(testName: String) {
+//    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
+//	  testSmallNotConnectedGraphEdgeFile, testName)
+//    // Simply propagates 4's value (which is 10) around with max aggregation
+//    g = {
+////      if (useReflection) {
+////        g.simplePropagateForwardFromOneReflection[Int](
+////          4 /* start vertex */ ,
+////          "intValue1",
+////          maxAggr)
+////      } else {
+//        g.simplePropagateForwardFromOne[Int](
+//          4 /* start vertex */ ,
+//          v => v.intValue1,
+//          maxAggr,
+//          (vertexValue: DoubleIntInt, finalValue: Int) => {
+//            vertexValue.intValue1 = finalValue
+//            vertexValue
+//          })
+//      }
+//    }
+//    val localVertices = g.vertices.collect()
+//    for (vertex <- localVertices) {
+//      println("vertexId: " + vertex.id)
+//      println("intValue1: " + vertex.data.intValue1)
+//      println("intValue2: " + vertex.data.intValue2)
+//      val actualDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)
+//      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id/10.0)
+//      println("actualDoubleVal: " + actualDoubleVal)
+//      println("expectedDoubleVal: " + expectedDoubleVal)
+//      assert(expectedDoubleVal == actualDoubleVal)
+//      assert(-1 == vertex.data.intValue2)
+//      if (vertex.id == 4 || vertex.id == 5 || vertex.id == 6)
+//    	  assert(10 == vertex.data.intValue1)
+//      else if (vertex.id == 0) assert(3 == vertex.data.intValue1)
+//      else if (vertex.id == 1) assert(2 == vertex.data.intValue1)
+//      else if (vertex.id == 2) assert(1 == vertex.data.intValue1)
+//      else if (vertex.id == 7) assert(11 == vertex.data.intValue1)
+//    }
+//    sc.stop()
+//  }
 
-  test("simplePropagateForwardFromOneTest") {
-	  doSimplePropagateForwardFromOneTest(false /* do not use reflection */,
-	    "simplePropagateForwardFromOneTest")
-  }
-  
-  test("simplePropagateForwardFromOneReflectionTest") {
-	  doSimplePropagateForwardFromOneTest(true /* use reflection */,
-	    "simplePropagateForwardFromOneReflectionTest")
-  }
-  
-  private def doSimplePropagateForwardFromOneTest(useReflection: Boolean,
-    testName: String) {
+  test("propagateUntilConvergenceNoEdgeValuesInTransposeFromOneTest") {
     var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, testName)
-    // Simply propagates 4's value (which is 10) around with max aggregation
-    g = {
-      if (useReflection) {
-        g.simplePropagateForwardFromOneReflection[Int](
-          4 /* start vertex */ ,
-          "intValue1",
-          maxAggr)
-      } else {
-        g.simplePropagateForwardFromOne[Int](
-          4 /* start vertex */ ,
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
-    val localVertices = g.vertices.collect()
-    for (vertex <- localVertices) {
-      println("vertexId: " + vertex.id)
-      println("intValue1: " + vertex.data.intValue1)
-      println("intValue2: " + vertex.data.intValue2)
-      val actualDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)
-      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id/10.0)
-      println("actualDoubleVal: " + actualDoubleVal)
-      println("expectedDoubleVal: " + expectedDoubleVal)
-      assert(expectedDoubleVal == actualDoubleVal)
-      assert(-1 == vertex.data.intValue2)
-      if (vertex.id == 4 || vertex.id == 5 || vertex.id == 6)
-    	  assert(10 == vertex.data.intValue1)
-      else if (vertex.id == 0) assert(3 == vertex.data.intValue1)
-      else if (vertex.id == 1) assert(2 == vertex.data.intValue1)
-      else if (vertex.id == 2) assert(1 == vertex.data.intValue1)
-      else if (vertex.id == 7) assert(11 == vertex.data.intValue1)
-    }
-    sc.stop()
-  }
-
-  test("simplePropagateInTransposeFromOneTest") {
-    doSimplePropagateInTransposeFromOneTest(false /* do not use reflection */,
-      "simplePropagateInTransposeFromOneTest")
-  }
-
-  test("simplePropagateInTransposeFromOneReflectionTest") {
-    doSimplePropagateInTransposeFromOneTest(true /* use reflection */,
-      "simplePropagateInTransposeFromOneReflectionTest")
-  }
-
-  private def doSimplePropagateInTransposeFromOneTest(useReflection: Boolean, testName: String) {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, "simplePropagateInTransposeFromOneTest")
+	  testSmallNotConnectedGraphEdgeFile, "propagateUntilConvergenceNoEdgeValuesInTransposeFromOneTest")
     // Simply propagates 5's value (which is 7) around with max aggregation
-    g = {
-      if (useReflection) {
-        g.simplePropagateInTransposeFromOneReflection[Int](
-          4 /* start vertex */ ,
-          "intValue1",
-          maxAggr)
-      } else {
-        g.simplePropagateInTransposeFromOne[Int](
-          4 /* start vertex */ ,
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
+    g =  g.propagateAndAggregateUntilConvergence[Int](
+      EdgeDirection.In,
+      v => v.id == 4 /* start vertex */ ,
+      v => v.intValue1,
+      (msg, evals) => msg,
+      (v, msgs) => { v.data.intValue1 = maxAggr(v.data.intValue1, msgs); v.data })
+
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
       println("vertexId: " + vertex.id)
@@ -617,15 +548,32 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     }
     sc.stop()
   }
-    
-  test("simplePropagateInBothDirectionsFromOneTest") {
-	  doSimplePropagateInBothDirectionsFromOneTest(false /* do not use reflection */,
-	    "simplePropagateInBothDirectionsFromOneTest")
-  }
-    
-  test("simplePropagateInBothDirectionsFromOneReflectionTest") {
-	  doSimplePropagateInBothDirectionsFromOneTest(true /* use reflection */,
-	    "simplePropagateInBothDirectionsFromOneTest")
+
+  test("propagateUntilConvergenceNoEdgeValuesInBothDirectionsFromOneTest") {
+    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
+      testSmallNotConnectedGraphEdgeFile, "propagateUntilConvergenceNoEdgeValuesInBothDirectionsFromOneTest")
+    // Simply propagates 5's value (which is 7) around with max aggregation
+    g = g.propagateAndAggregateUntilConvergence[Int](
+      EdgeDirection.Both,
+      v => v.id == 4 /* start vertex */ ,
+      v => v.intValue1,
+      (msg, e) => msg,
+      (v, msgs) => { v.data.intValue1 = maxAggr(v.data.intValue1, msgs); v.data })
+    val localVertices = g.vertices.collect()
+    for (vertex <- localVertices) {
+      println("vertexId: " + vertex.id)
+      println("intValue1: " + vertex.data.intValue1)
+      println("intValue2: " + vertex.data.intValue2)
+      val actualDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)
+      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id / 10.0)
+      println("actualDoubleVal: " + actualDoubleVal)
+      println("expectedDoubleVal: " + expectedDoubleVal)
+      assert(expectedDoubleVal == actualDoubleVal)
+      assert(-1 == vertex.data.intValue2)
+      if (vertex.id == 7) assert(11 == vertex.data.intValue1)
+      else assert(10 == vertex.data.intValue1)
+    }
+    sc.stop()
   }
     
   test("formSuperVerticesSelfLoopRemovalMaxEdgeMaxVertexValuesTest") {
@@ -649,23 +597,25 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
   }
 
     
-  test("updateVerticesBasedOnEdgeValuesMaxAggrTest") {
-    doUpdateVerticesBasedOnEdgeValuesTest(true /* use max to aggregate edges */)
+  test("updateVerticesUsingLocalEdgesMaxAggrTest") {
+    doUpdateVerticesUsingLocalEdgesTest(true /* use max to aggregate edges */)
   }
 
-  test("updateVerticesBasedOnEdgeValuesMinAggrTest") {
-    doUpdateVerticesBasedOnEdgeValuesTest(false /* use min to aggregate edges */)
+  test("updateVerticesUsingLocalEdgesMinAggrTest") {
+    doUpdateVerticesUsingLocalEdgesTest(false /* use min to aggregate edges */)
   }
   
-  private def doUpdateVerticesBasedOnEdgeValuesTest(useMaxAggr: Boolean) {
-    val sc = new SparkContext("local", "updateVerticesBasedOnEdgeValuesTest")
+  private def doUpdateVerticesUsingLocalEdgesTest(useMaxAggr: Boolean) {
+    val sc = new SparkContext("local", "updateVerticesUsingLocalEdgesTest")
     var g = GraphLoader.textFileWithVertexValues(sc, smallIntegerWeightedGraphVerticesFileName,
       smallIntegerWeightedGraphEdgesFileName,
       (id, values) => -1, (srcDstId, evalsString) => evalsString(0).toInt)
     println("printing edges before calling updateVertices...")
     println(g.edges.collect().deep.mkString("\n"))
     println("finished printing edges before calling updateVertices...")
-    g = g.updateVerticesBasedOnOutgoingEdgeValues((vertex, edgesList) => {
+    g = g.updateVerticesUsingLocalEdges(
+      EdgeDirection.Out,
+      (vertex, edgesList) => {
       var finalValue = vertex.data
       if (!edgesList.isEmpty) {
         if (useMaxAggr) {
@@ -706,7 +656,7 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     var g = GraphLoader.textFileWithVertexValues(sc, formSuperverticesTestVerticesFileName,
       formSuperverticesTestEdgesFileName,
       (id, values) => new DoubleIntInt(-1.0, values(0).toInt, -1), (srcDstId, evalsString) => evalsString(0).toDouble)//.cache()
-    g = g.mapVertices{ v => v.data.doubleValue = v.id.toDouble; v.data }
+    g = g.updateVertices{ v => v.data.doubleValue = v.id.toDouble; v.data }
     g = g.formSuperVertices(
       v => v.intValue1 /* group by intValue1 */,
       if (useMaxEdgesAggr) maxAggrSeq else minAggrSeq,
@@ -786,70 +736,18 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     sc.stop()
   }
 
-  private def doSimplePropagateInBothDirectionsFromOneTest(useReflection: Boolean, testName: String) {
-   var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, testName)
-    // Simply propagates 5's value (which is 7) around with max aggregation
-    g = {
-      if (useReflection) {
-        g.simplePropagateInBothDirectionsFromOneReflection[Int](
-          4 /* start vertex */,
-          "intValue1",
-          maxAggr)
-      } else {
-        g.simplePropagateInBothDirectionsFromOne[Int](
-          4 /* start vertex */ ,
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
-    val localVertices = g.vertices.collect()
-    for (vertex <- localVertices) {
-      println("vertexId: " + vertex.id)
-      println("intValue1: " + vertex.data.intValue1)
-      println("intValue2: " + vertex.data.intValue2)
-      val actualDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)
-      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id/10.0)
-      println("actualDoubleVal: " + actualDoubleVal)
-      println("expectedDoubleVal: " + expectedDoubleVal)
-      assert(expectedDoubleVal == actualDoubleVal)
-      assert(-1 == vertex.data.intValue2)
-      if (vertex.id == 7) assert(11 == vertex.data.intValue1)
-      else assert(10 == vertex.data.intValue1)
-    }
-    sc.stop()
-  }
-
-  test("simplePropagateForwardFromAllTest") {
-	doSimplePropagateForwardFromAllTest(false /* do not use reflection */,
-	  "simplePropagateForwardFromAllTest")
-  }
-
-  test("simplePropagateForwardFromAllReflectionTest") {
-	doSimplePropagateForwardFromAllTest(true /* use reflection */,
-	  "simplePropagateForwardFromAllTest")
-  }
-
-  private def doSimplePropagateForwardFromAllTest(useReflection: Boolean, testName: String) {
+  test("propagateUntilConvergenceNoEdgeValuesForwardFromAllTest") {
     var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, testName)
-    g = {
-      if (useReflection) {
-        g.simplePropagateForwardFromAllReflection[Int]("intValue1", maxAggr)
-      } else {
-        g.simplePropagateForwardFromAll[Int](
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
+	  testSmallNotConnectedGraphEdgeFile, "simplePropagateForwardFromAllTest")
+    g = g.propagateAndAggregateUntilConvergence[Int](
+      EdgeDirection.Out,
+      v => true,
+      v => v.intValue1,
+      (msg, evals) => msg,
+      (v, msgs) => {
+        v.data.intValue1 = maxAggr(v.data.intValue1, msgs)
+        v.data
+      })
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
       println("vertexId: " + vertex.id)
@@ -869,32 +767,18 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     sc.stop()
   }
 
-  test("simplePropagateInTransposeFromAllTest") {
-	  doSimplePropagateInTransposeFromAllTest(false /* do not use reflection */,
-	    "simplePropagateInTransposeFromAllTest")
-  }
-
-  test("simplePropagateInTransposeFromAllReflectionTest") {
-	  doSimplePropagateInTransposeFromAllTest(true /* use reflection */,
-	    "simplePropagateInTransposeFromAllReflectionTest")
-  }
-
-  private def doSimplePropagateInTransposeFromAllTest(useReflection: Boolean, testName: String) {
+  test("propagateUntilConvergenceNoEdgeValuesInTransposeFromAllTest") {
     var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, testName)
-    g = {
-      if (useReflection) {
-        g.simplePropagateInTransposeFromAllReflection[Int]("intValue1", maxAggr)
-      } else {
-        g.simplePropagateInTransposeFromAll[Int](
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
+	  testSmallNotConnectedGraphEdgeFile, "propagateUntilConvergenceNoEdgeValuesForwardFromAllTest")
+    g = g.propagateAndAggregateUntilConvergence[Int](
+      EdgeDirection.In,
+      v => true,
+      v => v.intValue1,
+      (msg, evals) => msg,
+      (v, msgs) => {
+         v.data.intValue1 = maxAggr(v.data.intValue1, msgs)
+         v.data
+     })
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
       println("vertexId: " + vertex.id)
@@ -912,39 +796,26 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     sc.stop()
   }
 
-  test("simplePropagateInBothDirectionsFromAllTest") {
-    doSimplePropagateInBothDirectionsFromAllTest(false /* do not use reflection */,
-      "simplePropagateInBothDirectionsFromAllTest")
-  }
+  test("propagateUntilConvergenceNoEdgeValuesInBothDirectionsFromAllTest") {
+    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
+      testSmallNotConnectedGraphEdgeFile, "propagateUntilConvergenceNoEdgeValuesInBothDirectionsFromAllTest")
+    g = g.propagateAndAggregateUntilConvergence[Int](
+      EdgeDirection.Both,
+      v => true,
+      v => v.intValue1,
+      (msg, evals) => msg,
+      (v, msgs) => {
+        v.data.intValue1 = maxAggr(v.data.intValue1, msgs);
+        v.data
+      })
 
-  test("simplePropagateInBothDirectionsFromAllReflectioTest") {
-    doSimplePropagateInBothDirectionsFromAllTest(true /* use reflection */,
-      "simplePropagateInBothDirectionsFromAllReflectionTest")
-  }
-  
-  private def doSimplePropagateInBothDirectionsFromAllTest(useReflection: Boolean, testName: String) {
-    	var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallNotConnectedGraphVertexFile,
-	  testSmallNotConnectedGraphEdgeFile, testName)
-    g = {
-      if (useReflection) {
-        g.simplePropagateInBothDirectionsFromAllReflection[Int]("intValue1", maxAggr)
-      } else {
-        g.simplePropagateInBothDirectionsFromAll[Int](
-          v => v.intValue1,
-          maxAggr,
-          (vertexValue: DoubleIntInt, finalValue: Int) => {
-            vertexValue.intValue1 = finalValue
-            vertexValue
-          })
-      }
-    }
     val localVertices = g.vertices.collect()
     for (vertex <- localVertices) {
       println("vertexId: " + vertex.id)
       println("intValue1: " + vertex.data.intValue1)
       println("intValue2: " + vertex.data.intValue2)
       val actualDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.data.doubleValue)
-      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id/10.0)
+      val expectedDoubleVal = getDoubleValueRoundedToTwoDigits(vertex.id / 10.0)
       println("actualDoubleVal: " + actualDoubleVal)
       println("expectedDoubleVal: " + expectedDoubleVal)
       assert(expectedDoubleVal == actualDoubleVal)
@@ -953,64 +824,45 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     }
     sc.stop()
   }
-
-  private def doSimplePropagateTest(direction: EdgeDirection) = {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
-      "simplePropagateTest")
-    // Simply propagates 4 around with null aggregation
-    g = g.simplePropagate(direction,
-      v => v.id == 4,
-      v => v.intValue1,
-      (vertexField: Int, msgs: Seq[Int]) => { msgs(0) },
-      (vertexValue, finalValue: Int) => {
-        vertexValue.intValue1 = finalValue
-        vertexValue
-      })
-    verifyThatValuesHaveConvergedForSimplePropagationTestAndStopContext(sc, g, direction)
-  }
+//
+//  private def doSimplePropagateTest(direction: EdgeDirection) = {
+//    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
+//      "simplePropagateTest")
+//    // Simply propagates 4 around with null aggregation
+//    g = g.simplePropagate(direction,
+//      v => v.id == 4,
+//      v => v.intValue1,
+//      (vertexField: Int, msgs: Seq[Int]) => { msgs(0) },
+//      (vertexValue, finalValue: Int) => {
+//        vertexValue.intValue1 = finalValue
+//        vertexValue
+//      })
+//    verifyThatValuesHaveConvergedForSimplePropagationTestAndStopContext(sc, g, direction)
+//  }
 
   private def checkIntValue1AndIntValue2AreUnchanged(vertex: Vertex[DoubleIntInt]) = {
     assert(-1 == vertex.data.intValue2)
     assert(((vertex.id + 2) % 8) == vertex.data.intValue1)
   }
 
-  private def doPropagateUntilConvergenceTest(direction: EdgeDirection, useReflection: Boolean, testName: String) {
+  private def doPropagateUntilConvergenceTest(direction: EdgeDirection, testName: String) {
     var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
       testName)
-    g = {
-      if (useReflection) {
-        g.propagateUntilConvergenceReflection[Double](direction,
-          v => v.id == 0,
-          "doubleValue",
-          (propagatedValue, edgeValue) => propagatedValue + edgeValue,
-          minAggr)
-      } else {
-        g.propagateUntilConvergence[Double](
+    g = g.propagateAndAggregateUntilConvergence[Double](
           direction,
           v => v.id == 0,
           value => value.doubleValue,
           (propagatedValue, edgeValue) => propagatedValue + edgeValue,
-          minAggr,
-          (vertexValue, finalValue) => {
-            if (finalValue < vertexValue.doubleValue) {
-              println("finalValue: " + finalValue + " is less than vertex value: " + vertexValue.doubleValue)
-              vertexValue.doubleValue = finalValue
-              println("set vertexvalue double value: " + vertexValue.doubleValue)
-            }
-            println("returned vertexValue's doubleValue: " + vertexValue.doubleValue)
-            vertexValue
+          (v, msgs) => {
+            v.data.doubleValue = minAggr(v.data.doubleValue, msgs)
+            v.data
           })
-      }
-    }
     verifyThatValuesHaveConvergedForPropagationTestAndStopContext(sc, g, direction)
   }
 
   private def doPropagateFixedNumberOfIterationsSevenAndLargerNumberOfIterationsTest(numIter: Int,
-    direction: EdgeDirection, testName: String, isReflection: Boolean) {
-    var (sc, g) = {
-      if (isReflection) loadGraphAndRunPropagateFixNumberOfIterationsReflection(numIter, direction, testName)
-      else loadGraphAndRunPropagateFixNumberOfIterations(numIter, direction, testName)
-    }
+    direction: EdgeDirection, testName: String) {
+    var (sc, g) = loadGraphAndRunPropagateFixNumberOfIterations(numIter, direction, testName)
     verifyThatValuesHaveConvergedForPropagationTestAndStopContext(sc, g, direction)
   }
 
@@ -1101,49 +953,43 @@ class GraphImplWithPrimitivesTest extends FunSuite with Serializable {
     testName: String) = {
     var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
       testName)
-    g = g.propagateFixedNumberOfIterations[Double](
+    g = g.propagateAndAggregateFixedNumberOfIterations[Double](
       direction,
       v => v.id == 0,
       value => value.doubleValue,
       (propagatedValue, edgeValue) => propagatedValue + edgeValue,
-      minAggr,
-      (vertexValue, finalValue) => {
-        if (finalValue < vertexValue.doubleValue) {
-          println("finalValue: " + finalValue + " is less than vertex value: " + vertexValue.doubleValue)
-          vertexValue.doubleValue = finalValue
-          println("set vertexvalue double value: " + vertexValue.doubleValue)
-        }
-        println("returned vertexValue's doubleValue: " + vertexValue.doubleValue)
-        vertexValue
+      (v, msgs) => {
+        v.data.doubleValue = minAggr(v.data.doubleValue, msgs)
+        v.data
       },
       numIter)
     (sc, g)
   }
-  
-  private def loadGraphAndRunPropagateFixNumberOfIterationsReflection(numIter: Int, direction: EdgeDirection,
-    testName: String) = {
-    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
-      testName)
-    g = g.propagateFixedNumberOfIterationsReflection[Double](
-      direction,
-      v => v.id == 0,
-      "doubleValue",
-      (propagatedValue, edgeValue) => propagatedValue + edgeValue,
-      (vertexValue, msgs) => {
-        var minValue = vertexValue
-        println("starting minValue: " + minValue + " msgs: " + msgs)
-        for (msg <- msgs) {
-          println("msg: " + msg)
-          print("min of minValue: " + minValue + " msg: " + msg + " is: ")
-          minValue = scala.math.min(minValue, msg)
-          println("" + minValue)
-        }
-        println("returning: " + minValue)
-        minValue
-      },
-      numIter)
-    (sc, g)
-  }
+//  
+//  private def loadGraphAndRunPropagateFixNumberOfIterationsReflection(numIter: Int, direction: EdgeDirection,
+//    testName: String) = {
+//    var (sc, g) = loadGraphFromVertexAndEdgeFileAndCache(testSmallGraphVertexFile, testSmallGraphEdgeFile,
+//      testName)
+//    g = g.propagateFixedNumberOfIterationsReflection[Double](
+//      direction,
+//      v => v.id == 0,
+//      "doubleValue",
+//      (propagatedValue, edgeValue) => propagatedValue + edgeValue,
+//      (vertexValue, msgs) => {
+//        var minValue = vertexValue
+//        println("starting minValue: " + minValue + " msgs: " + msgs)
+//        for (msg <- msgs) {
+//          println("msg: " + msg)
+//          print("min of minValue: " + minValue + " msg: " + msg + " is: ")
+//          minValue = scala.math.min(minValue, msg)
+//          println("" + minValue)
+//        }
+//        println("returning: " + minValue)
+//        minValue
+//      },
+//      numIter)
+//    (sc, g)
+//  }
 
   private def loadGraphFromVertexAndEdgeFileAndCache(
     vertexFileName: String, edgeFileName: String, testName: String): (spark.SparkContext, Graph[DoubleIntInt, Double]) = {

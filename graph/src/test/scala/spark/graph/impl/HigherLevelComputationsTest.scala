@@ -24,31 +24,16 @@ class HigherLevelComputationsTest  extends FunSuite with Serializable {
     val edgesPath = "/Users/semihsalihoglu/projects/graphx/spark/test-data/test_pointer_jumping_edges.txt"
     var g = GraphLoader.textFileWithVertexValues(sc, vertexValuesPath, edgesPath, 
       (id, values) => new DoubleIntInt(values(0).trim().toDouble, values(1).trim().toInt, -1),
-       (srcDstId, evalsString) => evalsString(0).toDouble)//.withPartitioner(numVPart, numEPart).cache()
-    g = HigherLevelComputations.pointerJumping(g, "intValue1")
-//    assert(8 == g.numEdges)
-//    assert(8 == g.numVertices)
-//    val localVertices = g.vertices.collect()
-//    for (vertex <- localVertices) {
-//      assert(-1 == vertex.data.intValue2)
-//      if (vertex.id == 0) {
-//        assert(4 == vertex.data.intValue1) // previously vertex 0 used to have intValue1 2
-//      } else if (vertex.id == 1) {
-//        assert(5 == vertex.data.intValue1) // previously vertex 1 used to have intValue1 3
-//      } else if (vertex.id == 2) {
-//        assert(6 == vertex.data.intValue1) // previously vertex 2 used to have intValue1 4
-//      } else if (vertex.id == 3) {
-//        assert(7 == vertex.data.intValue1) // previously vertex 3 used to have intValue1 5
-//      } else if (vertex.id == 4) {
-//        assert(0 == vertex.data.intValue1) // previously vertex 4 used to have intValue1 6
-//      } else if (vertex.id == 5) {
-//        assert(1 == vertex.data.intValue1) // previously vertex 5 used to have intValue1 7
-//      } else if (vertex.id == 6) {
-//        assert(2 == vertex.data.intValue1) // previously vertex 6 used to have intValue1 0
-//      } else if (vertex.id == 7) {
-//        assert(3 == vertex.data.intValue1) // previously vertex 7 used to have intValue1 1
-//      }
-//    }
+       (srcDstId, evalsString) => evalsString(0).toDouble)
+    g = HigherLevelComputations.pointerJumping(g, v => v.data.intValue1,
+      (v, msg) => { v.data.intValue1 = msg; v.data })   
+    assert(8 == g.numEdges)
+    assert(8 == g.numVertices)
+    val localVertices = g.vertices.collect()
+    for (vertex <- localVertices) {
+      assert(-1 == vertex.data.intValue2)
+      assert(vertex.data.intValue1 == 0)
+    }
     sc.stop()
   }
 

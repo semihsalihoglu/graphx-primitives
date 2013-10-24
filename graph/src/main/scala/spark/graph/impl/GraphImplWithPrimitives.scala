@@ -7,6 +7,8 @@ import spark.SparkContext._
 import spark.graph._
 import spark.graph.impl.GraphImpl._
 import spark.graph.examples.DoubleIntInt
+import scala.collection.mutable.ListBuffer
+import spark.graph.examples.ExampleAlgorithms
 
 class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
   override val numVertexPartitions: Int,
@@ -60,7 +62,7 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     tmpGraph.correctEdges()
   }
 
-  override def filterVerticesBasedOnEdgeValues(
+  override def filterVerticesUsingLocalEdges(
     direction: EdgeDirection,
     p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
     val joinedVertexAndNeighbors = getJoinedVertexAndNeighbors(direction)
@@ -73,7 +75,63 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     correctedGraph
   }
 
-  override def updateVerticesBasedOnEdgeValues[VD2: ClassManifest](
+  override def aggregateNeighborValuesFixedNumberOfIterations[A](
+    direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    msgF: Vertex[VD] => Option[A],
+    propagateAlongEdgeF: (A, ED) => A,
+    updateF: ((Vertex[VD], Seq[Edge[ED]]), Option[Seq[A]]) => VD,
+    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    var individualMsgs = vertices.map { v => (v.id, msgF(v)) }
+    def computeFromNbrIDToNbrIDTable(d: EdgeDirection): RDD[(Vid, Vid)] = {
+      // if propagating through in neighborse we will be joining the messages with e.srcId
+      if (EdgeDirection.In == d) { edges.flatMap { e => List((e.src, e.dst)) } }
+      else if (EdgeDirection.Out == d) { edges.flatMap { e => List((e.dst, e.src)) } }
+      else { edges.flatMap { e => List((e.dst, e.src), (e.src, e.dst)) } }
+    }
+    val fromNbrIDToNbrID = computeFromNbrIDToNbrIDTable(direction)
+    val fromNbrIDToNbrIDMsg = fromNbrIDToNbrID.join(individualMsgs)
+    val toNbrIDMsgs = fromNbrIDToNbrIDMsg.flatMap { fromIDToIDOptionalMsg => {
+      if (fromIDToIDOptionalMsg._2._2.isDefined) { List((fromIDToIDOptionalMsg._2._1, fromIDToIDOptionalMsg._2._2.get))}
+      else {None}
+    }}.groupByKey()
+    val vertexIDVertex = vertices.map { v => (v.id, v) }
+    def computeNbrIDEdgeTable(d: EdgeDirection): RDD[(Vid, Edge[ED])] = {
+      // if propagating through in neighborse we will be joining the messages with e.srcId
+      if (EdgeDirection.In == d) { edges.flatMap { e => List((e.dst, e)) } }
+      else if (EdgeDirection.Out == d) { edges.flatMap { e => List((e.src, e)) } }
+      else { edges.flatMap { e => List((e.src, e), (e.dst, e)) } }
+    }
+    val vertexIDEdges = computeNbrIDEdgeTable(direction).groupByKey
+    val vertexIDVertexEdges = vertexIDVertex.leftOuterJoin(vertexIDEdges)
+    val vertexIDVertexEdgesMsgsTable = vertexIDVertexEdges.leftOuterJoin(toNbrIDMsgs)
+    val newVertices = vertexIDVertexEdgesMsgsTable.map{ vertexIDVertexEdgesMsgs =>
+      val vertex = vertexIDVertexEdgesMsgs._2._1._1
+      if (!startVF(vertex)) {
+        vertex
+      } else {
+        var edges: Seq[Edge[ED]] = List()
+        if (vertexIDVertexEdgesMsgs._2._1._2.isDefined) {
+          edges = vertexIDVertexEdgesMsgs._2._1._2.get
+        }
+        new Vertex(vertex.id, updateF(
+          (vertexIDVertexEdgesMsgs._2._1._1, edges), vertexIDVertexEdgesMsgs._2._2))
+      }      
+    }
+    newGraph(newVertices, edges)
+  }
+
+  override def updateVerticesBasedOnNeighbors[A](
+	direction: EdgeDirection,
+    startVF: Vertex[VD] => Boolean,
+    msgF: Vertex[VD] => Option[A],
+    updateF: (Vertex[VD], Option[Seq[A]]) => VD) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED] = {
+    aggregateNeighborValuesFixedNumberOfIterations[A](direction, startVF, msgF, (msg, edgeValue) => msg,
+      (vertexAndnbrIDs, msgs) => updateF(vertexAndnbrIDs._1, msgs),
+      1 /* one iteration */)
+  }
+
+  override def updateVerticesUsingLocalEdges[VD2: ClassManifest](
     direction: EdgeDirection,
     map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
     val joinedVertexAndNeighbors = getJoinedVertexAndNeighbors(direction)
@@ -86,7 +144,7 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     correctedGraph
   }
 
-  override def mapReduceOverVerticesUsingEdges[A](direction: EdgeDirection,
+  override def aggregateGlobalValueOverVertices[A](direction: EdgeDirection,
     mapF: ((Vid, (VD, Option[Seq[spark.graph.Edge[ED]]]))) => Iterable[A],
     reduceF: (A, A) => A) (implicit m: Manifest[VD], n: Manifest[A]): A = {
     val joinedVertexAndNeighbors = getJoinedVertexAndNeighbors(direction)
@@ -107,59 +165,66 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     vertexIDVertexValue.leftOuterJoin(neighborIDEdgeValue)
   }
 
-  override def updateVertexValueBasedOnAnotherVertexsValue(idF: Vertex[VD] => Vid,
-    setF: (VD, Vertex[VD]) => VD): Graph[VD, ED] = {
+  override def updateAnotherVertexBasedOnSelf[A](
+    fromVertexF: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setF: (VD, Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    val neighborIDMsgsTable = vertices.flatMap { 
+    	  vertex => if (fromVertexF(vertex)) { Some(idF(vertex), msgF(vertex)) } else None }.groupByKey
+    println(neighborIDMsgsTable.collect().deep.mkString("\n"))
+    val vertexIDVertexValue = vertices.map { v => (v.id, v) }
+    val idVertexValueMsgs = vertexIDVertexValue.leftOuterJoin(neighborIDMsgsTable)
+    val newVertices = idVertexValueMsgs.map(
+      idVertexValueMsgs => 
+        // If there are no messages then the vertex stays as is
+        if (!idVertexValueMsgs._2._2.isDefined) {idVertexValueMsgs._2._1}
+        // Otherwise we apply the setF to update the vertex value
+        else {
+        (new Vertex(idVertexValueMsgs._2._1.id,
+        setF(idVertexValueMsgs._2._1.data, idVertexValueMsgs._2._2.get))) })
+    println ("printing new vertices ....")
+    println(newVertices.collect().deep.mkString("\n"))
+    newGraph(newVertices, edges)
+  }
+
+  override def updateSelfUsingAnotherVertexsValue[A](
+    verticesToUpdateP: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setF: (Vertex[VD], A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
     //    ClosureCleaner.clean(setF)
     val neighborIDVertexTable = vertices.map { vertex => (idF(vertex), vertex) }
     println(neighborIDVertexTable.collect().deep.mkString("\n"))
     val idNeighborValueVertexValue = computeVertexIdVertexDataTableAndJoinWithNbrIdVertexTable(neighborIDVertexTable)
     val newVertices = idNeighborValueVertexValue.map(
       neighborIDNeighborValueVertex => (new Vertex(neighborIDNeighborValueVertex._2._2.id,
-        setF(neighborIDNeighborValueVertex._2._1.data, neighborIDNeighborValueVertex._2._2))))
-    //    println(newVertices.collect().deep.mkString("\n"))
+        setF(neighborIDNeighborValueVertex._2._2,
+          msgF(neighborIDNeighborValueVertex._2._1)))))
     newGraph(newVertices, edges)
   }
 
-  override def updateVertexValueBasedOnAnotherVertexsValueReflection(idField: String, fromField: String,
-    toField: String)(implicit m: Manifest[VD]): Graph[VD, ED] = {
-    println("idFieldName: " + idField + " fromSetFieldName: " + fromField +
-      " toSetFieldName: " + toField + " Class[VD]: " + m.erasure.asInstanceOf[Class[VD]].getName())
-    val neighborIDVertexTable = vertices.map { vertex =>
-      (manifest[VD].erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == idField).get.invoke(
-        vertex.data).asInstanceOf[Int], vertex)
-    }
-    //    println(neighborIDVertexTable.collect().deep.mkString("\n"))
-    val idNeighborValueVertexValue = computeVertexIdVertexDataTableAndJoinWithNbrIdVertexTable(neighborIDVertexTable)
-    // TODO(semih): Right now we're running reflection twice for every copy operation. Instead try to
-    // run mapPartitions and 
-    val newVertices = idNeighborValueVertexValue.map(
-      neighborIDNeighborValueVertex => {
-        manifest[VD].erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == toField + "_$eq").get.invoke(
-          neighborIDNeighborValueVertex._2._2.data,
-          m.erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == fromField).get.invoke(
-            neighborIDNeighborValueVertex._2._1.data)).asInstanceOf[VD]
-        (neighborIDNeighborValueVertex._2._2)
-      })
-    println("dumping newVertices..")
-    println(newVertices.collect().deep.mkString("\n"))
-    newGraph(newVertices, edges)
-  }
-
-  override def pickRandomVertex(): Vid = {
-    val numVertices = vertices.count()
-    val probability = 50 / numVertices
+  override def pickRandomVertices(p: Vertex[VD] => Boolean, numVerticesToPick: Int): Seq[Vid] = {
+    val numVerticesToPickFrom = vertices.filter(p).count()
+    val actualNumVerticesToPick = scala.math.min(numVerticesToPickFrom, numVerticesToPick).intValue()
+    val probability = 50*actualNumVerticesToPick / numVerticesToPickFrom
     var found = false
-    var retVal = -1
+    var retVal: ListBuffer[Vid] = ListBuffer()
     while (!found) {
       val selectedVertices = vertices.flatMap { v =>
-        if (Random.nextDouble() < probability) { Some(v.id) }
+        if (p(v) && Random.nextDouble() < probability) { Some(v.id) }
         else { None }
       }
-      val collectedSelectedVertices = selectedVertices.collect()
-      println(collectedSelectedVertices.deep.mkString("\n"))
-      if (!collectedSelectedVertices.isEmpty) {
+      var collectedSelectedVertices = ListBuffer[Vid]()
+      collectedSelectedVertices.appendAll(selectedVertices.collect())
+      println("collectedSelectedVertices: " + collectedSelectedVertices)
+      if (collectedSelectedVertices.size >= actualNumVerticesToPick) {
         found = true
-        retVal = collectedSelectedVertices(Random.nextInt(collectedSelectedVertices.size))
+        for (i <- 1 to actualNumVerticesToPick) {
+          val randomIndex = Random.nextInt(collectedSelectedVertices.size)
+          retVal.add(collectedSelectedVertices(randomIndex))
+          collectedSelectedVertices.remove(randomIndex)
+        }
       } else {
         println("COULD NOT PICK A VERTEX. TRYING AGAIN....")
       }
@@ -167,25 +232,25 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     retVal
   }
 
-  override def propagateFixedNumberOfIterations[A](
+  override def propagateAndAggregateFixedNumberOfIterations[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
+//    aggrF: (A, Seq[A]) => A,
+    setF: (Vertex[VD], Seq[A]) => VD,
     numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
     doAggregateNeighborsFixedNumberOfIterations(direction, startVF, propagatedFieldF, propagateAlongEdgeF,
-      aggrF, setF, numIter, false /* propagate only the changed vertices */)
+      /* aggrF, */ setF, numIter, false /* propagate only the changed vertices */)
   }
-  
+
   private def doAggregateNeighborsFixedNumberOfIterations[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
+//    aggrF: (A, Seq[A]) => A,
+    setF: (Vertex[VD], Seq[A]) => VD,
     numIter: Int,
     aggregateAll: Boolean) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
     assert(numIter > 0)
@@ -193,62 +258,29 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
     var (extendedVertices, neighborIDEdgeValue) = computeExtendedVerticesAndNeighborIDEdgeValue(direction,
       startVF)
     for (i <- 0 until numIter) yield {
-      extendedVertices = runOneIterationOfPropagation(propagatedFieldF, propagateAlongEdgeF, aggrF, setF,
+      extendedVertices = runOneIterationOfPropagation(propagatedFieldF, propagateAlongEdgeF,
+        /* aggrF, */ setF,
         extendedVertices, neighborIDEdgeValue, aggregateAll)
     }
     val newVertices = extendedVertices.map { v => new Vertex(v._1, v._2.value) }
     newGraph(newVertices, edges)
   }
-
-  override def simpleAggregateNeighborsFixedNumberOfIterationsReflection[A](
-    aggregatedField: String,
-    aggrF: (A, Seq[A]) => A,
-    numIter: Int)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    doAggregateNeighborsFixedNumberOfIterations(EdgeDirection.Out,
-      (vertex: Vertex[VD]) => true,
-      vvals => m.erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == aggregatedField).get.invoke(
-        vvals).asInstanceOf[A],
-      (vertexField: A, edgeValue: ED) => vertexField,
-      aggrF,
-      (vvals, finalFieldValue: A) => {
-        manifest[VD].erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == aggregatedField + "_$eq").get.invoke(
-          vvals, finalFieldValue.asInstanceOf[Object])
-        vvals
-      },
-      numIter,
-      true /* aggregate all vertices, each iteration */ )
-  }
-
-  override def simpleAggregateNeighborsFixedNumberOfIterations[A](
-    aggregatedValueF: VD => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
-    numIter: Int)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    doAggregateNeighborsFixedNumberOfIterations(EdgeDirection.Out,
-      (vertex: Vertex[VD]) => true,
-      aggregatedValueF,
-      (vertexField: A, edgeValue: ED) => vertexField,
-      aggrF,
-      setF,
-      numIter,
-      true /* aggregate all vertices, each iteration */ )
-  }
  
-  override def propagateUntilConvergence[A](
+  override def propagateAndAggregateUntilConvergence[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+    setF: (Vertex[VD], Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
     var (extendedVertices, neighborIDEdgeValue) = computeExtendedVerticesAndNeighborIDEdgeValue(direction,
       startVF)
+    ExampleAlgorithms.debugRDD(extendedVertices.collect, "initial extended vertices")
     var numDiff = computeNumDiff(extendedVertices)
     var iterNo = 0
     while (numDiff > 0) {
       iterNo += 1
       println("iterationNumber: " + iterNo)
-      extendedVertices = runOneIterationOfPropagation(propagatedFieldF, propagateAlongEdgeF, aggrF, setF,
+      extendedVertices = runOneIterationOfPropagation(propagatedFieldF, propagateAlongEdgeF, /* aggrF,*/ setF,
       extendedVertices, neighborIDEdgeValue, false /* do not start from all */)
       numDiff = computeNumDiff(extendedVertices)
     }
@@ -309,9 +341,9 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
   }
 
   private def runOneIterationOfPropagation[A](propagatedFieldF: VD => A, propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A, setF: (VD, A) => VD, extendedVertices: spark.RDD[(Vid, VertexValueChanged[VD])],
+    /* aggrF: (A, Seq[A]) => A, */ setF: (Vertex[VD], Seq[A]) => VD, extendedVertices: spark.RDD[(Vid, VertexValueChanged[VD])],
     neighborIDEdgeValue: spark.RDD[(Vid, (Vid, ED))],
-    startFromAll: Boolean) (implicit m: Manifest[VD], n: Manifest[A]): RDD[(Vid, VertexValueChanged[VD])] = {
+    startFromAllEachIteration: Boolean) (implicit m: Manifest[VD], n: Manifest[A]): RDD[(Vid, VertexValueChanged[VD])] = {
     // We compute the messages by:
     // (1) joining the fields of each vertex v with their neighbors w they should send a message to
     // (2) then executing the propagateAlongEdgeF function on the (v.data, (v, w).data).
@@ -333,18 +365,16 @@ class GraphImplWithPrimitives[VD: ClassManifest, ED: ClassManifest] protected (
       val vertexID = vIDVertexDataMsgs._1
       val vertexData = vIDVertexDataMsgs._2._1
       val msgs = vIDVertexDataMsgs._2._2
-      if (msgs.isEmpty) {
+      if (msgs.isEmpty || !msgs.isDefined) {
         println("No messages for vertex: " + vertexID)
-        (vertexID, new VertexValueChanged(vertexData, false || startFromAll))
+        (vertexID, new VertexValueChanged(vertexData, false || startFromAllEachIteration))
       } else {
         println("There are messages for vertex: " + vertexID + " msgs: " + msgs.get)
         val oldData = vertexData
         val propagatingField = propagatedFieldF(vertexData)
-        val aggregatedValue = aggrF(propagatingField, msgs.get)
-        println("propagatingField: " + propagatingField + " aggregatedValue: " + aggregatedValue)
         val oldValue = propagatedFieldF(oldData)
-        val newData = setF(vertexData, aggregatedValue)
-        val changed = startFromAll || oldValue != propagatedFieldF(newData)
+        val newData = setF(Vertex(vertexID, vertexData), msgs.get)
+        val changed = startFromAllEachIteration || oldValue != propagatedFieldF(newData)
         println("changed: " + changed + " oldField: " + oldValue + " newField: "
           + propagatedFieldF(newData))
         (vertexID, new VertexValueChanged(newData, changed))

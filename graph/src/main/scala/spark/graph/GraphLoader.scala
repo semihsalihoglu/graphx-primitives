@@ -21,7 +21,7 @@ object GraphLoader {
 
     // Parse the edge data table
     val edges = sc.textFile(edgesPath).flatMap { line =>
-      if (!line.isEmpty && line(0) != '#') {
+      if (!line.trim.isEmpty && line(0) != '#') {
         val lineArray = line.split("\\s+")
         if(lineArray.length < 2) {
           println("Invalid line: " + line)

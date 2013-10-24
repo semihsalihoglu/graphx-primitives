@@ -88,11 +88,11 @@ abstract class Graph[VD: ClassManifest, ED: ClassManifest] {
    * val rawGraph: Graph[(), ()] = Graph.textFile("hdfs://file")
    * val root = 42
    * var bfsGraph = rawGraph
-   *   .mapVertices[Int](v => if(v.id == 0) 0 else Math.MaxValue)
+   *   .updateVertices[Int](v => if(v.id == 0) 0 else Math.MaxValue)
    * }}}
    *
    */
-  def mapVertices[VD2: ClassManifest](map: Vertex[VD] => VD2): Graph[VD2, ED]
+  def updateVertices[VD2: ClassManifest](map: Vertex[VD] => VD2): Graph[VD2, ED]
 
   /**
    * Construct a new graph where each the value of each edge is transformed by
@@ -301,7 +301,7 @@ abstract class Graph[VD: ClassManifest, ED: ClassManifest] {
    * vertex record
    * {{{
    * val rawGraph: Graph[Int,()] = Graph.textFile("webgraph")
-   *   .mapVertices(v => 0)
+   *   .updateVertices(v => 0)
    * val outDeg: RDD[(Int, Int)] = rawGraph.outDegrees()
    * val graph = rawGraph.leftJoinVertices[Int,Int](outDeg,
    *   (v, deg) => deg )
@@ -322,7 +322,7 @@ abstract class Graph[VD: ClassManifest, ED: ClassManifest] {
   // for a given Graph object, and thus the lazy vals in GraphOps would work as intended.
   val ops = new GraphOps(this)
  
-  // New Primitives/Syntactic sugars (by semih)  
+  // New Primitives (by semih)  
  /**
    * Returns a new graph with only the edges that satisfy the predicate p applied to the edge's:
    * (1) src vertex ID, (2) dst vertex ID, (3) data
@@ -358,536 +358,74 @@ abstract class Graph[VD: ClassManifest, ED: ClassManifest] {
    *  @param direction direction of the edges the predicate wants to look at
    *  @param p predicate to apply to (Vid, (VD, Seq[Edge[ED]]))
    **/
-  def filterVerticesBasedOnEdgeValues(direction: EdgeDirection,
+  def filterVerticesUsingLocalEdges(direction: EdgeDirection,
     p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED]
-
-  def filterVerticesBasedOnOutgoingEdgeValues(p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
-    filterVerticesBasedOnEdgeValues(EdgeDirection.Out, p)
-  }
-
-  def filterVerticesBasedOnIncomingEdgeValues(p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
-    filterVerticesBasedOnEdgeValues(EdgeDirection.In, p)
-  }
-
-  def filterVerticesBasedOnBothInAndOutEdgeValues(p: ((Vid, (VD, Option[Seq[Edge[ED]]]))) => Boolean): Graph[VD, ED] = {
-    filterVerticesBasedOnEdgeValues(EdgeDirection.Both, p)
-  }
-
-  def updateVerticesBasedOnEdgeValues[VD2: ClassManifest](
+  
+  def updateVerticesUsingLocalEdges[VD2: ClassManifest](
     direction: EdgeDirection,
     map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED]
 
-  def updateVerticesBasedOnOutgoingEdgeValues[VD2: ClassManifest](
-    map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
-    updateVerticesBasedOnEdgeValues(EdgeDirection.Out, map)
-  }
-
-  def updateVerticesBasedOnIncomingEdgeValues[VD2: ClassManifest](
-    map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
-    updateVerticesBasedOnEdgeValues(EdgeDirection.In, map)
-  }
-
-  def updateVerticesBasedOnBothIncomingAndOutgoingEdgeValues[VD2: ClassManifest](
-    map: (Vertex[VD], Option[Seq[Edge[ED]]]) => VD2): Graph[VD2, ED] = {
-    updateVerticesBasedOnEdgeValues(EdgeDirection.Both, map)
-  }
-
-  def mapReduceOverVerticesUsingEdges[A](direction: EdgeDirection,
+  def aggregateGlobalValueOverVertices[A](direction: EdgeDirection,
     mapF: ((Vid, (VD, Option[Seq[spark.graph.Edge[ED]]]))) => Iterable[A],
     reduceF: (A, A) => A) (implicit m: Manifest[VD], n: Manifest[A]): A
+
   /**
    * For each vertex x, sets x's value based on another vertex y's value, where the ID of y is stored
    * somewhere in x's value.
    * 
-   * @param idFunction the function that takes vertex x and returns the ID of y
-   * @param setFunction takes (y's value, x's value) and return x's new value
+   * @param predicate that chooses which vertices to update
+   * @param idF the function that takes vertex x and returns the ID of y
+   * @param msgF the function that returns the part of other vertex's value that is needed
+   *             to update self
+   * @param setF takes (self, x's value) and return self's new value
    */
-  def updateVertexValueBasedOnAnotherVertexsValue(idFunction: Vertex[VD] => Vid,
-    setFunction: (VD, Vertex[VD]) => VD): Graph[VD, ED]
+  def updateSelfUsingAnotherVertexsValue[A](
+    verticesToUpdateP: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setFunction: (Vertex[VD], A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED]
+
   
-  /**
-   * For each vertex x, sets x's toField value based on another vertex y's fromField value,
-   * where the ID of y is stored in x's idField. The field names are passed as strings and they are
-   * accessed and set through reflection.
-   * 
-   * @param idField field in x's value that stores the id of y
-   * @param fromField field in y's value to copy from
-   * @param toField field in x's value to copy to
-   */
-  def updateVertexValueBasedOnAnotherVertexsValueReflection(idField: String,
-    fromField: String, toField: String) (implicit m: Manifest[VD]): Graph[VD, ED]
-  
+  def updateAnotherVertexBasedOnSelf[A](
+    fromVertexF: Vertex[VD] => Boolean,
+    idF: Vertex[VD] => Vid,
+    msgF: Vertex[VD] => A,
+    setF: (VD, Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED]
+
   /**
    * Picks a random vertex from the graph and returns its identifier.
    */
-  def pickRandomVertex(): Vid
-  
-  def propagateFixedNumberOfIterations[A](
+  def pickRandomVertex(): Vid = {
+    pickRandomVertices(v => true, 1)(0)
+  }
+
+  def pickRandomVertices(p: Vertex[VD] => Boolean, numVerticesToPick: Int): Seq[Vid]
+
+  def propagateAndAggregateFixedNumberOfIterations[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
+    propagatedValueF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
+    setF: (Vertex[VD], Seq[A]) => VD,
     numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED]
-  
-  def propagateFixedNumberOfIterationsReflection[A](
-    direction: EdgeDirection,
-    startVF: Vertex[VD] => Boolean,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateFixedNumberOfIterations(direction, startVF,
-      vvals => m.erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == propagatedField).get.invoke(
-        vvals).asInstanceOf[A],
-      propagateAlongEdgeF, aggrF,
-      (vvals, finalFieldValue: A) => {
-        manifest[VD].erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == propagatedField + "_$eq").get.invoke(
-          vvals, finalFieldValue.asInstanceOf[Object])
-        vvals
-      }, numIter)
-  }
 
-  def propagateForwardFixedNumberOfIterations[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
-    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateFixedNumberOfIterations(
-      EdgeDirection.Out, startVF, propagatedFieldF, propagateAlongEdgeF, aggrF, setF, numIter)
-  }
-  
-  def propagateInTransposeFixedNumberOfIterations[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
-    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateFixedNumberOfIterations(
-      EdgeDirection.In, startVF, propagatedFieldF, propagateAlongEdgeF, aggrF, setF, numIter)
-  }
-  
-  def propagateInBothDirectionsFixedNumberOfIterations[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
-    numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateFixedNumberOfIterations(
-      EdgeDirection.Both, startVF, propagatedFieldF, propagateAlongEdgeF, aggrF, setF, numIter)
-  }
-
-  def propagateUntilConvergence[A](
+  def propagateAndAggregateUntilConvergence[A](
     direction: EdgeDirection,
     startVF: Vertex[VD] => Boolean,
     propagatedFieldF: VD => A,
     propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED]
-  
-  def propagateUntilConvergenceReflection[A](
+    setF: (Vertex[VD], Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED]
+
+  def aggregateNeighborValues[A](
     direction: EdgeDirection,
-    startVF: Vertex[VD] => Boolean,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-     propagateUntilConvergence(direction, startVF,
-      vvals => m.erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == propagatedField).get.invoke(
-        vvals).asInstanceOf[A],
-      propagateAlongEdgeF, aggrF,
-      (vvals, finalFieldValue: A) => {
-        manifest[VD].erasure.asInstanceOf[Class[VD]].getMethods().find(_.getName == propagatedField + "_$eq").get.invoke(
-          vvals, finalFieldValue.asInstanceOf[Object])
-        vvals
-      })
+    propagatedValueF: VD => A,
+    setF: (Vertex[VD], Seq[A]) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
+	  propagateAndAggregateFixedNumberOfIterations[A](direction, v => true, propagatedValueF, (msg, e) => msg,
+	    setF, 1)
   }
   
-  def propagateForwardUntilConvergence[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergence(
-          EdgeDirection.Out,
-          startVF,
-          propagatedFieldF,
-          propagateAlongEdgeF,
-          aggrF,
-          setF)
-  }
-  
-  def propagateForwardUntilConvergenceReflection[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-          EdgeDirection.Out,
-          startVF,
-          propagatedField,
-          propagateAlongEdgeF,
-          aggrF)
-  }
-
-  def propagateForwardUntilConvergenceFromOneReflection[A](
-    vertexID: Vid,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-      EdgeDirection.Out,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal
-      },
-      propagatedField,
-      propagateAlongEdgeF,
-      aggrF)
-  }
-
-  def propagateInTransposeUntilConvergenceFromOneReflection[A](
-    vertexID: Vid,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-      EdgeDirection.In,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal
-      },
-      propagatedField,
-      propagateAlongEdgeF,
-      aggrF)
-  }
-
-  def propagateInBothDirectionsUntilConvergenceFromOneReflection[A](
-    vertexID: Vid,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A)(implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-      EdgeDirection.Both,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal
-      },
-      propagatedField,
-      propagateAlongEdgeF,
-      aggrF)
-  }
-  def propagateInTransposeUntilConvergence[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergence(
-          EdgeDirection.In,
-          startVF,
-          propagatedFieldF,
-          propagateAlongEdgeF,
-          aggrF,
-          setF)
-  }
-  
-  def propagateInTransposeUntilConvergenceReflection[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-          EdgeDirection.In,
-          startVF,
-          propagatedField,
-          propagateAlongEdgeF,
-          aggrF)
-  }
-
-  def propagateInBothDirectionsUntilConvergence[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedFieldF: VD => A,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergence(
-          EdgeDirection.Both,
-          startVF,
-          propagatedFieldF,
-          propagateAlongEdgeF,
-          aggrF,
-          setF)
-  }
-
-  def propagateInBothDirectionsUntilConvergenceReflection[A](
-    startVF: Vertex[VD] => Boolean,
-    propagatedField: String,
-    propagateAlongEdgeF: (A, ED) => A,
-    aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergenceReflection(
-          EdgeDirection.Both,
-          startVF,
-          propagatedField,
-          propagateAlongEdgeF,
-          aggrF)
-  }
-
-  def simplePropagate[A](
-   direction: EdgeDirection,
-   startVF: Vertex[VD] => Boolean,
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-    propagateUntilConvergence(direction, startVF, propagatedFieldF,
-      (vertexField: A, edgeValue: ED) => vertexField,
-      aggrF,
-      setF)
-  }
-
-  def simplePropagateReflection[A](
-   direction: EdgeDirection,
-   startVF: Vertex[VD] => Boolean,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-     propagateUntilConvergenceReflection(
-       direction,
-       startVF,
-       propagatedField,
-       (vertexField: A, edgeValue: ED) => vertexField,
-       aggrF)
-  }
-
-  def simplePropagateFixedNumberOfIterationsReflection[A](
-   direction: EdgeDirection,
-   startVF: Vertex[VD] => Boolean,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A,
-   numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-     propagateFixedNumberOfIterationsReflection(
-       direction,
-       startVF,
-       propagatedField,
-       (vertexField: A, edgeValue: ED) => vertexField,
-       aggrF,
-       numIter)
-  }
-
- def simplePropagateForwardReflection[A](
-   startVF: Vertex[VD] => Boolean,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Out,
-	  startVF,
-	  propagatedField,
-	  aggrF)
-  }
-
- def simplePropagateInTransposeReflection[A](
-   startVF: Vertex[VD] => Boolean,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.In,
-	  startVF,
-	  propagatedField,
-	  aggrF)
-  }
-
- def simplePropagateInBothDirectionsReflection[A](
-   startVF: Vertex[VD] => Boolean,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Both,
-	  startVF,
-	  propagatedField,
-	  aggrF)
-  }
-
- def simplePropagateForwardFromOne[A](
-   vertexID: Vid,
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.Out,
-      (vertex: Vertex[VD]) => { val retVal = vertex.id == vertexID; println("isStarting from vertex: " + vertex.id + " " + retVal); retVal},
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-
-  def simplePropagateForwardFromOneReflection[A](
-   vertexID: Vid,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Out,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal},
-	  propagatedField,
-	  aggrF)
-  }
-    
- def simplePropagateInTransposeFromOne[A](
-   vertexID: Vid,
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.In,
-      (vertex: Vertex[VD]) => vertex.id == vertexID,
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-  
-  def simplePropagateInTransposeFromOneReflection[A](
-   vertexID: Vid,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.In,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal},
-	  propagatedField,
-	  aggrF)
- }
-
- def simplePropagateInBothDirectionsFromOne[A](
-   vertexID: Vid,
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.Both,
-      (vertex: Vertex[VD]) => vertex.id == vertexID,
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-  
-  def simplePropagateInBothDirectionsFromOneReflection[A](
-   vertexID: Vid,
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Both,
-      (vertex: Vertex[VD]) => {
-        val retVal = vertex.id == vertexID;
-        println("isStarting from vertex: " + vertex.id + " " + retVal);
-        retVal},
-	  propagatedField,
-	  aggrF)
- }
-
- def simplePropagateForwardFromAll[A](
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.Out,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-
- def simplePropagateForwardFromAllReflection[A](
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Out,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedField,
-	  aggrF)
-  }
-   
- def simpleAggregateNeighborsFixedNumberOfIterationsReflection[A](
-    aggregatedField: String,
-    aggrF: (A, Seq[A]) => A,
-    numIter: Int) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED]
-
- def simpleAggregateNeighborsFixedNumberOfIterations[A](
-    aggregateValueF: VD => A,
-    aggrF: (A, Seq[A]) => A,
-    setF: (VD, A) => VD,
-    numIter: Int) (implicit m: Manifest[VD], n:Manifest[A]): Graph[VD, ED]
-
- def simplePropagateFixedNumberOfIterationsForwardFromAllReflection[A](
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A,
-   numIter: Int) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateFixedNumberOfIterationsReflection(
-	  EdgeDirection.Out,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedField,
-	  aggrF,
-	  numIter)
-  }
-
-  def simplePropagateInTransposeFromAll[A](
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.In,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-
- def simplePropagateInTransposeFromAllReflection[A](
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.In,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedField,
-	  aggrF)
-  }
-
-  def simplePropagateInBothDirectionsFromAll[A](
-   propagatedFieldF: VD => A,
-   aggrF: (A, Seq[A]) => A,
-   setF: (VD, A) => VD) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagate(
-	  EdgeDirection.Both,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedFieldF,
-	  aggrF,
-	  setF)
-  }
-
-  def simplePropagateInBothDirectionsFromAllReflection[A](
-   propagatedField: String,
-   aggrF: (A, Seq[A]) => A) (implicit m: Manifest[VD], n: Manifest[A]): Graph[VD, ED] = {
-	simplePropagateReflection(
-	  EdgeDirection.Both,
-	  (vertex: Vertex[VD]) => true,
-	  propagatedField,
-	  aggrF)
-  }
-
   def formSuperVertices(groupByKeyF: VD => Vid, edgeAggrF: Seq[ED] => ED, vertexAggrF: Seq[VD] => VD,
-    removeSelfLoops: Boolean)
-  	(implicit m: Manifest[VD]): Graph[VD, ED]
+    removeSelfLoops: Boolean)(implicit m: Manifest[VD]): Graph[VD, ED]
 }
 
 object Graph {
